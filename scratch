@@ -47,4 +47,6 @@ async def embeddings_endpoint(request: EmbeddingRequest):
 ------
 main.py 
 
-app.include_router(embedding.router, prefix="")  # Include embeddings router
+from openai_frontend.embedding import router as embedding_router  # Add this import
+
+app.include_router(embedding_router, prefix="")  # Add this line
