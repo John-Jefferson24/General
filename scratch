@@ -2,8 +2,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional
 import numpy as np
-import tritonclient.http as triton_http
 import base64
+import aiohttp
 
 router = APIRouter()
 
@@ -20,34 +20,59 @@ class EmbeddingResponse(BaseModel):
 
 async def get_embeddings(request: EmbeddingRequest):
     try:
-        client = triton_http.InferenceServerClient(url="localhost:9000")  # Try 9000; revert to 8000 if needed
+        # Convert single string input to list for consistent processing
         inputs = [request.input] if isinstance(request.input, str) else request.input
         
-        input_data = np.array(inputs, dtype=object)
-        triton_input = triton_http.InferInput("text_input", input_data.shape, "BYTES")
-        triton_input.set_data_from_numpy(input_data)
-
-        result = client.infer(model_name=request.model, inputs=[triton_input])
-        embeddings = result.as_numpy("embeddings")  # NumPy array of floats
-
-        # Format embeddings based on encoding_format
-        data = []
-        for i, emb in enumerate(embeddings):
-            if request.encoding_format == "base64":
-                # Convert float32 array to bytes and encode as base64
-                emb_bytes = emb.astype(np.float32).tobytes()
-                emb_encoded = base64.b64encode(emb_bytes).decode("utf-8")
-                embedding_data = emb_encoded
-            else:
-                # Default to float (list of numbers)
-                embedding_data = emb.tolist()
-            data.append({"object": "embedding", "embedding": embedding_data, "index": i})
-
-        return EmbeddingResponse(
-            data=data,
-            model=request.model,
-            usage={"prompt_tokens": len(inputs), "total_tokens": len(inputs)}
-        )
+        # Format request according to Triton HTTP API
+        inference_payload = {
+            "inputs": [
+                {
+                    "name": "text_input",
+                    "shape": [len(inputs)],
+                    "datatype": "BYTES",
+                    "data": inputs
+                }
+            ]
+        }
+        
+        # Make direct HTTP request to model endpoint
+        async with aiohttp.ClientSession() as session:
+            url = f"http://localhost:9000/v1/models/{request.model}"
+            async with session.post(url, json=inference_payload) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    raise HTTPException(
+                        status_code=response.status, 
+                        detail=f"Triton error: {error_text}"
+                    )
+                
+                result = await response.json()
+                # Extract embeddings from the response
+                embeddings = np.array(result["outputs"][0]["data"]).reshape(result["outputs"][0]["shape"])
+                
+                # Format the response as expected by OpenAI compatible API
+                data = []
+                for i, emb in enumerate(embeddings):
+                    if request.encoding_format == "base64":
+                        emb_bytes = np.array(emb, dtype=np.float32).tobytes()
+                        emb_encoded = base64.b64encode(emb_bytes).decode("utf-8")
+                        embedding_data = emb_encoded
+                    else:
+                        embedding_data = emb.tolist() if isinstance(emb, np.ndarray) else emb
+                    data.append({
+                        "object": "embedding", 
+                        "embedding": embedding_data, 
+                        "index": i
+                    })
+                
+                return EmbeddingResponse(
+                    data=data,
+                    model=request.model,
+                    usage={"prompt_tokens": len(inputs), "total_tokens": len(inputs)}
+                )
+                
+    except aiohttp.ClientError as e:
+        raise HTTPException(status_code=500, detail=f"HTTP request failed: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Embedding inference failed: {str(e)}")
 
