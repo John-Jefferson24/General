@@ -1,0 +1,6 @@
+curl -X POST http://localhost:9000/v1/embeddings \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input": "This is a test sentence for embedding",
+    "model": "jina-embeddings-v2"
+  }'
