@@ -1,17 +1,16 @@
-embedding.py -----
-
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional
 import numpy as np
 import tritonclient.http as triton_http
+import base64
 
 router = APIRouter()
 
 class EmbeddingRequest(BaseModel):
     input: str | List[str]
     model: str
-    encoding_format: Optional[str] = "float"
+    encoding_format: Optional[str] = "float"  # Supports "float" or "base64"
 
 class EmbeddingResponse(BaseModel):
     object: str = "list"
@@ -21,7 +20,7 @@ class EmbeddingResponse(BaseModel):
 
 async def get_embeddings(request: EmbeddingRequest):
     try:
-        client = triton_http.InferenceServerClient(url="localhost:8000")
+        client = triton_http.InferenceServerClient(url="localhost:9000")  # Try 9000; revert to 8000 if needed
         inputs = [request.input] if isinstance(request.input, str) else request.input
         
         input_data = np.array(inputs, dtype=object)
@@ -29,9 +28,21 @@ async def get_embeddings(request: EmbeddingRequest):
         triton_input.set_data_from_numpy(input_data)
 
         result = client.infer(model_name=request.model, inputs=[triton_input])
-        embeddings = result.as_numpy("embeddings")
+        embeddings = result.as_numpy("embeddings")  # NumPy array of floats
 
-        data = [{"object": "embedding", "embedding": emb.tolist(), "index": i} for i, emb in enumerate(embeddings)]
+        # Format embeddings based on encoding_format
+        data = []
+        for i, emb in enumerate(embeddings):
+            if request.encoding_format == "base64":
+                # Convert float32 array to bytes and encode as base64
+                emb_bytes = emb.astype(np.float32).tobytes()
+                emb_encoded = base64.b64encode(emb_bytes).decode("utf-8")
+                embedding_data = emb_encoded
+            else:
+                # Default to float (list of numbers)
+                embedding_data = emb.tolist()
+            data.append({"object": "embedding", "embedding": embedding_data, "index": i})
+
         return EmbeddingResponse(
             data=data,
             model=request.model,
@@ -43,10 +54,3 @@ async def get_embeddings(request: EmbeddingRequest):
 @router.post("/v1/embeddings")
 async def embeddings_endpoint(request: EmbeddingRequest):
     return await get_embeddings(request)
-
-------
-main.py 
-
-from openai_frontend.embedding import router as embedding_router  # Add this import
-
-app.include_router(embedding_router, prefix="")  # Add this line
