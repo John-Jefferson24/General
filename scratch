@@ -1,20 +1,180 @@
-curl -X POST http://localhost:9000/v1/embeddings \
-  -H "Content-Type: application/json" \
-  -d '{
-    "input": "This is a test sentence for embedding",
-    "model": "jina-embeddings-v2"
-  }'
-
-curl -X POST http://localhost:8000/v2/models/jina-embeddings/infer \
-  -d '{
-    "inputs": [
-      {
-        "name": "input_text",
-        "shape": [1],
-        "datatype": "BYTES",
-        "data": ["This is a test sentence for embedding"]
-      }
-    ]
-  }'
-
-https://github.com/triton-inference-server/server/tree/r25.01/python/openai/openai_frontend/frontend/fastapi/routers
+# Add this route to handle embeddings specifically
+@app.api_route("/v1/embeddings", methods=["POST"])
+async def embeddings_endpoint(request: Request, token: str = Depends(_verify_token)):
+    """
+    Handle /v1/embeddings requests - transform Triton response to OpenAI format
+    """
+    headers = _strip_service_headers(request)
+    body = await request.body()
+    model_name = await _get_model_name_from_request(request)
+    
+    print(f'model name is :', model_name)
+    model_path = _get_model_url_from_config(model_name)
+    print(f'model_path is :', model_path)
+    
+    # /v1/embeddings should map to Triton's /v2/models/{model}/infer endpoint
+    full_path = "v2/models/" + model_name + "/infer"
+    print(f'full_path :', full_path)
+    
+    target_url = f"{model_path}/{full_path}"
+    target_url = target_url.rstrip("/")
+    print(f'target url :', target_url)
+    
+    # Transform the OpenAI embedding request to Triton format
+    body_json = json.loads(body.decode('utf8').replace("'", '"'))
+    
+    # Get input from request
+    input_text = body_json.get("input", "")
+    encoding_format = body_json.get("encoding_format", None)
+    
+    # Apply model-specific input formatting
+    if isinstance(input_text, str):
+        input_text = [input_text]  # Convert to list if it's a single string
+    
+    # Create Triton request format
+    triton_request = {
+        "inputs": [
+            {
+                "name": "input_text",  # Adjust if your model uses a different name
+                "shape": [len(input_text)],
+                "datatype": "BYTES",
+                "data": input_text
+            }
+        ]
+    }
+    
+    triton_body = json.dumps(triton_request).encode('utf8')
+    print(f'body for model request :', triton_body)
+    
+    # Remove content-length to avoid errors
+    try:
+        del headers['content-length']
+    except KeyError:
+        pass
+    
+    # Set proper content type
+    headers['content-type'] = 'application/json'
+    print('headers :', headers)
+    
+    logger.info(f"Forwarding request for model %s to URL %s", model_name, target_url)
+    
+    try:
+        # Forward the request to Triton
+        async with httpx.AsyncClient(timeout=settings.default_timeout) as client:
+            response = await client.request(
+                method="POST",
+                url=target_url,
+                headers=headers,
+                content=triton_body,
+                timeout=settings.default_timeout
+            )
+        
+        print(response.status_code)
+        
+        if response.status_code != 200:
+            logger.warn(f"Received invalid response from model name: %s", model_name)
+            return response.json()
+        
+        # Process Triton response
+        triton_response = response.json()
+        
+        # Find the embedding output tensor
+        embedding_output = None
+        output_tensor_names = ["embedding", "embeddings", "output", "last_hidden_state"]
+        
+        for output in triton_response.get("outputs", []):
+            if output.get("name") in output_tensor_names:
+                embedding_output = output
+                break
+        
+        if not embedding_output:
+            logger.warn(f"Could not find embedding output in response from model: %s", model_name)
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Invalid response format from embedding model. Available outputs: {[o.get('name') for o in triton_response.get('outputs', [])]}"
+            )
+        
+        # Extract embedding data
+        embedding_data = embedding_output.get("data", [])
+        shape = embedding_output.get("shape", [])
+        
+        # Determine embedding dimension
+        if len(shape) == 2:
+            num_embeddings = shape[0]
+            embedding_dim = shape[1]
+        else:
+            # Try to infer dimensions for flattened arrays
+            common_dims = [128, 256, 384, 512, 768, 1024, 1536, 2048, 4096]
+            total_values = len(embedding_data)
+            
+            # Find the appropriate dimension that divides total values evenly
+            embedding_dim = None
+            for dim in common_dims:
+                if total_values % dim == 0:
+                    embedding_dim = dim
+                    break
+            
+            if embedding_dim is None:
+                # Default to assuming it's a single embedding
+                embedding_dim = total_values
+                num_embeddings = 1
+            else:
+                num_embeddings = total_values // embedding_dim
+        
+        # Split the embedding data into individual vectors
+        embedding_vectors = []
+        if num_embeddings == 1:
+            # Single embedding
+            embedding_vectors = [embedding_data]
+        elif isinstance(embedding_data[0], list):
+            # Already split into vectors
+            embedding_vectors = embedding_data
+        else:
+            # Need to split flattened array
+            for i in range(num_embeddings):
+                start_idx = i * embedding_dim
+                end_idx = start_idx + embedding_dim
+                vector = embedding_data[start_idx:end_idx]
+                embedding_vectors.append(vector)
+        
+        # Create OpenAI format response
+        openai_response = {
+            "object": "list",
+            "data": [],
+            "model": model_name,
+            "usage": {
+                "prompt_tokens": sum(len(text.split()) for text in input_text),
+                "total_tokens": sum(len(text.split()) for text in input_text)
+            }
+        }
+        
+        # Add embedding objects with proper encoding
+        for i, vector in enumerate(embedding_vectors):
+            if i >= len(input_text):
+                # Don't return more embeddings than we had inputs
+                break
+                
+            embedding_item = {
+                "object": "embedding",
+                "index": i
+            }
+            
+            if encoding_format == "base64":
+                # Convert to numpy array
+                vector_array = np.array(vector, dtype=np.float32)
+                # Convert to bytes
+                vector_bytes = vector_array.tobytes()
+                # Encode as base64
+                vector_base64 = base64.b64encode(vector_bytes).decode('ascii')
+                embedding_item["embedding"] = vector_base64
+                embedding_item["encoding_format"] = "base64"
+            else:
+                embedding_item["embedding"] = vector
+            
+            openai_response["data"].append(embedding_item)
+        
+        return openai_response
+        
+    except Exception as e:
+        logger.warn(f"Error processing embedding request: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error processing embedding request: {str(e)}")
