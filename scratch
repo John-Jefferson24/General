@@ -16,3 +16,5 @@ curl -X POST http://localhost:8000/v2/models/jina-embeddings/infer \
       }
     ]
   }'
+
+https://github.com/triton-inference-server/server/tree/r25.01/python/openai/openai_frontend/frontend/fastapi/routers
