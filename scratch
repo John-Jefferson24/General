@@ -4,3 +4,15 @@ curl -X POST http://localhost:9000/v1/embeddings \
     "input": "This is a test sentence for embedding",
     "model": "jina-embeddings-v2"
   }'
+
+curl -X POST http://localhost:8000/v2/models/jina-embeddings/infer \
+  -d '{
+    "inputs": [
+      {
+        "name": "input_text",
+        "shape": [1],
+        "datatype": "BYTES",
+        "data": ["This is a test sentence for embedding"]
+      }
+    ]
+  }'
