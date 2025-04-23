@@ -792,3 +792,10 @@ OIDCScope "openid email profile"
 OIDCResponseType "code"
 OIDCClaimPrefix "OIDC_"
 OIDCRemoteUserClaim sub
+
+# Set claims prefix and ensure access token is passed in environment
+OIDCPassClaimsAs environment
+OIDCClaimPrefix "OIDC_"
+OIDCPassAccessToken On
+OIDCPassRefreshToken On
+OIDCRemoteUserClaim sub
