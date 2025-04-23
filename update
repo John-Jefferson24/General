@@ -16,7 +16,7 @@ OIDCClientSecret your_client_secret
 OIDCRedirectURI https://api.example.com/jwt-callback
 OIDCCryptoPassphrase some-random-secure-passphrase
 OIDCSessionInactivityTimeout 3600
-OIDCSessionMaxDuration 8h
+OIDCSessionMaxDuration 266000
 
 # Required OIDC settings that were missing
 OIDCScope "openid email profile"
@@ -36,58 +36,7 @@ OIDCPassRefreshToken On
     SetHandler type-map
     
     # Create a simple HTML response with the token
-    ErrorDocument 200 "
-    <html>
-    <head>
-        <title>Your JWT Token</title>
-        <style>
-            body { font-family: sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; }
-            .token { background: #f5f5f5; padding: 10px; border: 1px solid #ddd; word-break: break-all; margin: 20px 0; }
-            button { background: #0066cc; color: white; border: none; padding: 8px 16px; cursor: pointer; }
-            pre { background: #f5f5f5; padding: 10px; border: 1px solid #ddd; overflow-x: auto; }
-        </style>
-    </head>
-    <body>
-        <h1>Your JWT Token</h1>
-        <p>Copy this token to use with the Model API:</p>
-        <div class='token' id='token'>%{OIDC_id_token}e</div>
-        <button onclick='copyToken()'>Copy to clipboard</button>
-        
-        <h2>Example Usage</h2>
-        <pre>
-from openai import OpenAI
-
-client = OpenAI(
-    api_key='dummy-value-not-used',
-    base_url='https://api.example.com/',
-    default_headers={
-        'Authorization': 'Bearer YOUR_TOKEN_HERE'
-    }
-)
-
-# For completions (llama-70b, mixtral, mistral)
-completion = client.chat.completions.create(
-    model='mixtral',
-    messages=[{'role': 'user', 'content': 'Hello'}]
-)
-
-# For embeddings (jina, e5-mistral)
-embedding = client.embeddings.create(
-    model='jina',
-    input='Hello world'
-)
-        </pre>
-        
-        <script>
-        function copyToken() {
-            const token = document.getElementById('token').innerText;
-            navigator.clipboard.writeText(token);
-            alert('Token copied to clipboard');
-        }
-        </script>
-    </body>
-    </html>
-    "
+    ErrorDocument 200 /token.html
 </Location>
 
 # Simple health check endpoint - No JWT auth required here
