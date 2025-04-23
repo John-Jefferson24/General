@@ -668,3 +668,13 @@ data:
     ErrorDocument 401 '{"error": {"message": "Authentication required", "type": "authentication_error", "param": null, "code": null}}'
     ErrorDocument 404 '{"error": {"message": "The requested resource was not found", "type": "invalid_request_error", "param": null, "code": null}}'
     ErrorDocument 500 '{"error": {"message": "The server had an error processing your request", "type": "server_error", "param": null, "code": null}}'
+
+
+<Location /get-token>
+        AuthType openid-connect
+        Require valid-user
+        
+        # Simple token handler
+        SetHandler type-map
+        ErrorDocument 200 "<html><head><title>Token</title></head><body><h1>Your JWT Token</h1><div id='token'>%{OIDC_access_token}e</div><button onclick=\"var t=document.getElementById('token').innerText;navigator.clipboard.writeText(t);alert('Token copied');\">Copy Token</button></body></html>"
+    </Location>
