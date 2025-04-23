@@ -799,3 +799,16 @@ OIDCClaimPrefix "OIDC_"
 OIDCPassAccessToken On
 OIDCPassRefreshToken On
 OIDCRemoteUserClaim sub
+
+<Location /get-token>
+    AuthType openid-connect
+    Require valid-user
+    
+    # Output the token directly
+    RewriteEngine On
+    RewriteRule .* - [E=MY_TOKEN:%{HTTP:access_token}]
+    
+    # Simple token display
+    SetHandler type-map
+    ErrorDocument 200 "<html><head><title>Token</title></head><body><h1>Your JWT Token</h1><div id='token'>%{MY_TOKEN}e</div><button onclick=\"var t=document.getElementById('token').innerText;navigator.clipboard.writeText(t);alert('Token copied');\">Copy Token</button></body></html>"
+</Location>
