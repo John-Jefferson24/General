@@ -22,6 +22,7 @@ RUN mkdir -p /opt/app-root/secrets
 # Ensure required modules are enabled
 # Create module configuration files if they don't exist
 RUN echo "LoadModule security2_module modules/mod_security2.so" > /etc/httpd/conf.modules.d/10-mod_security.conf && \
+    RUN echo "LoadModule mpm_event_module modules/mod_mpm_event.so" > /etc/httpd/conf.modules.d/00-mpm.conf
     echo "LoadModule auth_openidc_module modules/mod_auth_openidc.so" > /etc/httpd/conf.modules.d/10-mod_auth_openidc.conf && \
     echo "LoadModule proxy_module modules/mod_proxy.so" > /etc/httpd/conf.modules.d/10-mod_proxy.conf && \
     echo "LoadModule proxy_http_module modules/mod_proxy_http.so" > /etc/httpd/conf.modules.d/10-mod_proxy_http.conf && \
@@ -64,6 +65,12 @@ fi
 if [ -d "/opt/app-root/secrets/ssl" ] && [ "$(ls -A /opt/app-root/secrets/ssl)" ]; then
     echo "Found SSL certificates, copying to Apache ssl directory..."
     cp -r /opt/app-root/secrets/ssl/* /etc/httpd/ssl/
+fi
+
+# Verify that MPM module is loaded
+if [ ! -f "/etc/httpd/conf.modules.d/00-mpm.conf" ]; then
+    echo "ERROR: MPM module configuration missing. Creating default..."
+    echo "LoadModule mpm_event_module modules/mod_mpm_event.so" > /etc/httpd/conf.modules.d/00-mpm.conf
 fi
 
 # Start Apache in the foreground
