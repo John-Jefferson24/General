@@ -1,0 +1,254 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: apache-proxy-config
+  namespace: your-namespace
+  labels:
+    app: ml-api-gateway
+data:
+  httpd.conf: |
+    # Load required modules
+    LoadModule proxy_module modules/mod_proxy.so
+    LoadModule proxy_http_module modules/mod_proxy_http.so
+    LoadModule headers_module modules/mod_headers.so
+    LoadModule rewrite_module modules/mod_rewrite.so
+    LoadModule security2_module modules/mod_security2.so
+    LoadModule auth_openidc_module modules/mod_auth_openidc.so
+
+    # Basic server settings
+    ServerName api.example.com
+
+    # Ping Federate SSO configuration
+    OIDCProviderMetadataURL https://pingfederate.yourbank.com/.well-known/openid-configuration
+    OIDCClientID your_client_id
+    OIDCClientSecret your_client_secret
+    OIDCRedirectURI https://api.example.com/jwt-callback
+    OIDCCryptoPassphrase some-random-secure-passphrase
+    OIDCSessionInactivityTimeout 3600
+    OIDCSessionMaxDuration 8h
+
+    # Required OIDC settings that were missing
+    OIDCScope "openid email profile"
+    OIDCRemoteUserClaim sub
+    OIDCResponseType "id_token token"
+    OIDCSSLValidateServer On
+    OIDCPassIDTokenAs claims
+    OIDCPassClaimsAs environment
+    OIDCPassRefreshToken On
+
+    # Token display endpoint - No JWT auth required here
+    <Location /get-token>
+        AuthType openid-connect
+        Require valid-user
+        
+        # This simple handler produces a basic HTML page with the token
+        SetHandler type-map
+        
+        # Create a simple HTML response with the token
+        ErrorDocument 200 "
+        <html>
+        <head>
+            <title>Your JWT Token</title>
+            <style>
+                body { font-family: sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; }
+                .token { background: #f5f5f5; padding: 10px; border: 1px solid #ddd; word-break: break-all; margin: 20px 0; }
+                button { background: #0066cc; color: white; border: none; padding: 8px 16px; cursor: pointer; }
+                pre { background: #f5f5f5; padding: 10px; border: 1px solid #ddd; overflow-x: auto; }
+            </style>
+        </head>
+        <body>
+            <h1>Your JWT Token</h1>
+            <p>Copy this token to use with the Model API:</p>
+            <div class='token' id='token'>%{OIDC_id_token}e</div>
+            <button onclick='copyToken()'>Copy to clipboard</button>
+            
+            <h2>Example Usage</h2>
+            <pre>
+    from openai import OpenAI
+
+    client = OpenAI(
+        api_key='dummy-value-not-used',
+        base_url='https://api.example.com/',
+        default_headers={
+            'Authorization': 'Bearer YOUR_TOKEN_HERE'
+        }
+    )
+
+    # For completions (llama-70b, mixtral, mistral)
+    completion = client.chat.completions.create(
+        model='mixtral',
+        messages=[{'role': 'user', 'content': 'Hello'}]
+    )
+
+    # For embeddings (jina, e5-mistral)
+    embedding = client.embeddings.create(
+        model='jina',
+        input='Hello world'
+    )
+            </pre>
+            
+            <script>
+            function copyToken() {
+                const token = document.getElementById('token').innerText;
+                navigator.clipboard.writeText(token);
+                alert('Token copied to clipboard');
+            }
+            </script>
+        </body>
+        </html>
+        "
+    </Location>
+
+    # Simple health check endpoint - No JWT auth required here
+    <Location /health>
+        # No authentication for health check - Apache 2.4 compatible syntax
+        Require all granted
+        
+        # Return basic health status
+        SetHandler server-status
+    </Location>
+
+    # Enable mod_security for JSON inspection
+    <IfModule security2_module>
+        SecRuleEngine On
+        SecRequestBodyAccess On
+        SecRequestBodyLimit 13107200
+        SecRequestBodyNoFilesLimit 13107200
+        
+        # Extract model name from JSON body
+        SecRule REQUEST_METHOD "^POST$" \
+            "id:1001,\
+            phase:2,\
+            nolog,\
+            pass,\
+            chain"
+        SecRule REQUEST_BODY "@rx \"model\"\s*:\s*\"([^\"]+)\"" \
+            "capture,\
+            setvar:tx.model_name=%{TX.1},\
+            nolog,\
+            pass"
+        
+        # Set model name as environment variable
+        SecRule TX:model_name "!^$" \
+            "id:1002,\
+            phase:2,\
+            nolog,\
+            pass,\
+            setenv:MODEL_NAME=%{TX.model_name}"
+        
+        # FIXED: Verify request has valid OpenAI format with properly structured chain rule
+        # The first rule sets up the condition, second rule performs the disruptive action
+        SecRule REQUEST_BODY "!@rx \"(messages|input)\"" \
+            "id:1003,\
+            phase:2,\
+            chain,\
+            log,\
+            msg:'Bad Request: Missing required fields in request body'"
+            SecRule REQUEST_URI ".*" \
+                "t:none,\
+                deny,\
+                status:400"
+        
+        # Route to specific model services with their specific URL patterns
+        # Completion Models (using OpenAI-compatible /v1/chat/completions path)
+        SecRule TX:model_name "@contains llama-70b" \
+            "id:2001,\
+            phase:2,\
+            nolog,\
+            pass,\
+            setenv:MODEL_SERVICE=triton-1.app.svc.bank.com:9000,\
+            setenv:MODEL_PATH=/v1/chat/completions"
+            
+        SecRule TX:model_name "@contains mixtral" \
+            "id:2002,\
+            phase:2,\
+            nolog,\
+            pass,\
+            setenv:MODEL_SERVICE=triton-1.app.svc.bank.com:9000,\
+            setenv:MODEL_PATH=/v1/chat/completions"
+            
+        SecRule TX:model_name "@contains mistral" \
+            "id:2003,\
+            phase:2,\
+            nolog,\
+            pass,\
+            chain"
+        SecRule TX:model_name "!@contains e5-mistral" \
+            "nolog,\
+            pass,\
+            setenv:MODEL_SERVICE=triton-1.app.svc.bank.com:9000,\
+            setenv:MODEL_PATH=/v1/chat/completions"
+            
+        # Embedding Models (using Triton's /v2/models/X/generate path)
+        SecRule TX:model_name "@contains jina" \
+            "id:2004,\
+            phase:2,\
+            nolog,\
+            pass,\
+            setenv:MODEL_SERVICE=triton-2.apps.bank.com:8000,\
+            setenv:MODEL_PATH=/v2/models/jina_embedding/generate"
+            
+        SecRule TX:model_name "@contains e5-mistral" \
+            "id:2005,\
+            phase:2,\
+            nolog,\
+            pass,\
+            setenv:MODEL_SERVICE=triton-2.apps.bank.com:8000,\
+            setenv:MODEL_PATH=/v2/models/e5_mistral_embedding/generate"
+        
+        # Default model service if none matched
+        SecRule ENV:MODEL_SERVICE "^$" \
+            "id:3001,\
+            phase:2,\
+            nolog,\
+            pass,\
+            setenv:MODEL_SERVICE=triton-1.app.svc.bank.com:9000,\
+            setenv:MODEL_PATH=/v1/chat/completions"
+        
+        # Log the routing decision for debugging
+        SecRule TX:model_name "!^$" \
+            "id:3002,\
+            phase:2,\
+            nolog,\
+            pass,\
+            setenv:ROUTE_LOG=Model: %{TX.model_name}, Service: %{ENV:MODEL_SERVICE}, Path: %{ENV:MODEL_PATH}"
+    </IfModule>
+
+    # API endpoint configuration with JWT auth for all API requests except health and token endpoints
+    <LocationMatch "^/(?!health|get-token|jwt-callback).*">
+        # Apply JWT auth to all API endpoints
+        AuthType openid-connect
+        Require valid-user
+        
+        # Configure proxy settings
+        ProxyPreserveHost On
+        
+        # These settings allow streaming to work properly
+        SetEnv proxy-initial-not-pooled 1
+        SetEnv force-proxy-request-1.0 1
+        SetEnv proxy-nokeepalive 1
+        
+        # Set headers for backend - FIXED to use id_token instead of access_token
+        RequestHeader set X-User-ID "%{REMOTE_USER}e"
+        RequestHeader set X-JWT-Token "%{OIDC_id_token}e"
+        RequestHeader set X-Original-Model "%{ENV:MODEL_NAME}e"
+        
+        # Enable rewrite engine
+        RewriteEngine On
+        
+        # Now route directly to the specific service + path based on model
+        RewriteCond %{ENV:MODEL_SERVICE} !^$
+        RewriteCond %{ENV:MODEL_PATH} !^$
+        # The key difference: we're not passing along the original path, 
+        # but using the specific backend path for each model
+        RewriteRule ^/(.*)$ http://%{ENV:MODEL_SERVICE}%{ENV:MODEL_PATH} [P,L]
+        
+        # Fallback if no model detected (should not happen with our default)
+        RewriteRule ^/(.*)$ http://triton-1.app.svc.bank.com:9000/v1/chat/completions [P,L]
+    </LocationMatch>
+
+    # Set error response format to match OpenAI API format
+    ErrorDocument 400 '{"error": {"message": "Bad request format", "type": "invalid_request_error", "param": null, "code": null}}'
+    ErrorDocument 401 '{"error": {"message": "Authentication required", "type": "authentication_error", "param": null, "code": null}}'
+    ErrorDocument 404 '{"error": {"message": "The requested resource was not found", "type": "invalid_request_error", "param": null, "code": null}}'
+    ErrorDocument 500 '{"error": {"message": "The server had an error processing your request", "type": "server_error", "param": null, "code": null}}'
