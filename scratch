@@ -778,3 +778,17 @@ LogLevel warn
 
 # Include configuration files from conf.d directory
 IncludeOptional conf.d/*.conf
+
+
+# Ping Federate SSO configuration
+OIDCProviderMetadataURL https://pingfederate.yourbank.com/.well-known/openid-configuration
+OIDCClientID your_client_id
+OIDCClientSecret your_client_secret
+OIDCRedirectURI https://api.example.com/jwt-callback
+OIDCCryptoPassphrase some-random-secure-passphrase
+OIDCSessionInactivityTimeout 3600
+OIDCSessionMaxDuration 28800
+OIDCScope "openid email profile"
+OIDCResponseType "code"
+OIDCClaimPrefix "OIDC_"
+OIDCRemoteUserClaim sub
