@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Your JWT Token</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 0 20px;
+            line-height: 1.6;
+        }
+        .token {
+            background: #f4f4f4;
+            padding: 15px;
+            border: 1px solid #ccc;
+            word-break: break-all;
+            margin: 20px 0;
+            font-family: monospace;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        pre {
+            background: #f4f4f4;
+            padding: 15px;
+            border: 1px solid #ccc;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>Your JWT Token</h1>
+    <p>Use this token to authenticate with the Model API:</p>
+    <div class="token" id="token">%OIDC_id_token%</div>
+    <button onclick="copyToken()">Copy to Clipboard</button>
+
+    <h2>Example Usage</h2>
+    <pre>
+from openai import OpenAI
+
+client = OpenAI(
+    api_key="dummy-value-not-used",
+    base_url="https://api.example.com/",
+    default_headers={"Authorization": "Bearer YOUR_TOKEN_HERE"}
+)
+
+# For completions
+completion = client.chat.completions.create(
+    model="mixtral",
+    messages=[{"role": "user", "content": "Hello"}]
+)
+
+# For embeddings
+embedding = client.embeddings.create(
+    model="jina",
+    input="Hello world"
+)
+    </pre>
+
+    <script>
+        function copyToken() {
+            const token = document.getElementById("token").innerText;
+            navigator.clipboard.writeText(token).then(() => {
+                alert("Token copied to clipboard!");
+            });
+        }
+    </script>
+</body>
+</html>
