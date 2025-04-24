@@ -249,3 +249,53 @@ EXPOSE 8080
 
 # Run Apache
 CMD ["/usr/sbin/httpd", "-D", "FOREGROUND"]
+
+
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: apache-routing-config
+  namespace: your-namespace
+data:
+  routing.conf: |
+    # Load required modules
+    LoadModule proxy_module modules/mod_proxy.so
+    LoadModule proxy_http_module modules/mod_proxy_http.so
+    LoadModule headers_module modules/mod_headers.so
+    LoadModule rewrite_module modules/mod_rewrite.so
+
+    # Routing rules based on MODEL_NAME
+    <IfModule rewrite_module>
+        # Chat Completion Models (OpenAI-compatible /v1/chat/completions)
+        RewriteCond %{ENV:MODEL_NAME} llama-70b
+        RewriteRule ^/(.*)$ http://triton-1.app.svc.cluster.local:9000/v1/chat/completions [P,L,NE]
+        RewriteRule ^/(.*)$ - [E=ENDPOINT_TYPE:chat]
+
+        RewriteCond %{ENV:MODEL_NAME} mixtral
+        RewriteRule ^/(.*)$ http://triton-1.app.svc.cluster.local:9000/v1/chat/completions [P,L,NE]
+        RewriteRule ^/(.*)$ - [E=ENDPOINT_TYPE:chat]
+
+        RewriteCond %{ENV:MODEL_NAME} mistral
+        RewriteRule ^/(.*)$ http://triton-1.app.svc.cluster.local:9000/v1/chat/completions [P,L,NE]
+        RewriteRule ^/(.*)$ - [E=ENDPOINT_TYPE:chat]
+
+        # Embedding Models (Triton PyTorch /v2/models/X/generate)
+        RewriteCond %{ENV:MODEL_NAME} jina
+        RewriteRule ^/(.*)$ http://triton-2.apps.svc.cluster.local:8000/v2/models/jina_embedding/generate [P,L,NE]
+        RewriteRule ^/(.*)$ - [E=ENDPOINT_TYPE:embedding]
+
+        RewriteCond %{ENV:MODEL_NAME} e5-mistral
+        RewriteRule ^/(.*)$ http://triton-2.apps.svc.cluster.local:8000/v2/models/e5_mistral_embedding/generate [P,L,NE]
+        RewriteRule ^/(.*)$ - [E=ENDPOINT_TYPE:embedding]
+
+        # Default routing (assume chat completion)
+        RewriteCond %{ENV:MODEL_NAME} ^$
+        RewriteRule ^/(.*)$ http://triton-1.app.svc.cluster.local:9000/v1/chat/completions [P,L,NE]
+        RewriteRule ^/(.*)$ - [E=ENDPOINT_TYPE:chat]
+    </IfModule>
+
+    # Proxy settings for streaming
+    SetEnv proxy-initial-not-pooled 1
+    SetEnv force-proxy-request-1.0 1
+    SetEnv proxy-nokeepalive 1
