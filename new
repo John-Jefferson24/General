@@ -1,0 +1,33 @@
+# Load mod_security module
+LoadModule security2_module modules/mod_security2.so
+# Enable mod_security
+<IfModule security2_module>
+    SecRuleEngine On
+    SecRequestBodyAccess On
+    SecRequestBodyLimit 1048576
+    SecRequestBodyNoFilesLimit 1048576
+    SecAuditEngine RelevantOnly
+    SecAuditLog /var/log/modsecurity/audit.log
+    
+    # Validate JSON format for POST requests
+    SecRule REQUEST_METHOD "^POST$" \
+        "id:1001,\
+        phase:2,\
+        deny,\
+        status:400,\
+        log,\
+        chain,\
+        msg:'Missing required fields (messages or input)'"
+        SecRule REQUEST_HEADERS:Content-Type "application/json" \
+            "chain"
+            SecRule REQUEST_BODY "!@rx \"(messages|input)\"" ""
+    
+    # Sanitize JSON input
+    SecRule REQUEST_BODY "@rx [;<>\|]" \
+        "id:1002,\
+        phase:2,\
+        deny,\
+        status:400,\
+        log,\
+        msg:'Invalid characters in JSON payload'"
+</IfModule>
