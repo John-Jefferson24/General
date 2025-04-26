@@ -1,5 +1,15 @@
 ENV PYTHONHOME=/usr
 ENV PYTHONPATH=/usr/lib/python3.9:/usr/lib/python3.9/lib-dynload:/usr/lib/python3.9/site-packages
 
-WSGIPythonHome /usr
-WSGIPythonPath /usr/lib/python3.9
+LoadModule wsgi_module modules/mod_wsgi_python3.so
+
+# WSGI configuration for Python script
+WSGIDaemonProcess api user=apache group=apache threads=5 python-home=/usr
+WSGIScriptAlias / /var/www/html/api.py
+WSGIPythonPath /usr/lib/python3.9:/usr/lib/python3.9/lib-dynload:/usr/lib/python3.9/site-packages
+
+<Directory /var/www/html>
+    WSGIProcessGroup api
+    WSGIApplicationGroup %{GLOBAL}
+    Require all granted
+</Directory>
