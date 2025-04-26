@@ -1,154 +1,113 @@
-<Location /test-token>
-    # No auth required for testing
-    Header set Content-Type "text/html; charset=UTF-8"
-    RewriteEngine On
-    RewriteRule ^/test-token$ /var/www/html/token.html [L]
-    
-    # Set a test token
-    SetEnv OIDC_id_token "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IlRlc3QgVXNlciIsImlhdCI6MTUxNjIzOTAyMiwiZXhwIjoxNjE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
-</Location>
+import os
+import json
+import logging
+import requests
+from jwt import decode as jwt_decode, get_unverified_header, InvalidTokenError
 
-<Location "/test">
-    ProxyPreserveHost On
-    RequestHeader set X-User-ID "test-user"
-    RequestHeader set X-JWT-Token "disabled-for-testing"
-    RequestHeader set X-Original-Model "%{ENV:MODEL_NAME}e"
-</Location>
+# Configure logging with rotation
+from logging.handlers import RotatingFileHandler
+handler = RotatingFileHandler(
+    os.getenv('LOG_FILE', '/var/log/api.log'),
+    maxBytes=10*1024*1024,
+    backupCount=5
+)
+logging.basicConfig(handlers=[handler], level=logging.INFO)
 
-<Location /get-token>
-    AuthType openid-connect
-    Require valid-user
-    
-    # Instead of using ErrorDocument 200, use these directives:
-    Header set Content-Type "text/html; charset=UTF-8"
-    RewriteEngine On
-    RewriteRule ^/get-token$ /var/www/html/token.html [L]
-    
-    # Set environment variables for the token template
-    SetEnvIf Request_URI "^/get-token" SHOW_TOKEN=true
-</Location>
+# Configuration
+JWKS_URL = os.getenv('JWKS_URL', 'https://pingfederate.yourbank.com/.well-known/jwks.json')
+AUDIENCE = os.getenv('AUDIENCE', 'your_client_id')
+ISSUER = os.getenv('ISSUER', 'https://pingfederate.yourbank.com')
+REDIRECT_URL = os.getenv('JWT_REDIRECT_URL', '/jwt-callback')
+MAX_PAYLOAD_SIZE = 1024 * 1024  # 1MB
 
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Get Your JWT Token</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            max-width: 800px;
-            margin: 40px auto;
-            padding: 0 20px;
-            line-height: 1.6;
+def validate_jwt(token):
+    """Validate JWT using PingFederate's JWKS endpoint."""
+    try:
+        jwks = requests.get(JWKS_URL, timeout=5, verify=True).json()
+        header = get_unverified_header(token)
+        kid = header['kid']
+        key = next(k for k in jwks['keys'] if k['kid'] == kid)
+        decoded = jwt_decode(
+            token,
+            key,
+            algorithms=['RS256'],
+            audience=AUDIENCE,
+            issuer=ISSUER
+        )
+        return decoded
+    except (requests.RequestException, InvalidTokenError, KeyError, StopIteration) as e:
+        logging.error(f"JWT validation failed: {str(e)}")
+        return None
+
+def error_response(message, status, headers):
+    """Return a standardized error response."""
+    logging.error(message)
+    start_response(status, headers)
+    return [json.dumps({
+        "error": {
+            "message": message,
+            "type": "invalid_request_error",
+            "param": None,
+            "code": None
         }
-        .token {
-            background: #f4f4f4;
-            padding: 15px;
-            border: 1px solid #ccc;
-            word-break: break-all;
-            margin: 20px 0;
-            font-family: monospace;
-        }
-        .login-button, button {
-            background: #007bff;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            cursor: pointer;
-            border-radius: 4px;
-            font-size: 16px;
-            margin: 20px 0;
-        }
-        .login-button:hover, button:hover {
-            background: #0056b3;
-        }
-        .hidden {
-            display: none;
-        }
-        pre {
-            background: #f4f4f4;
-            padding: 15px;
-            border: 1px solid #ccc;
-            overflow-x: auto;
-        }
-        .info-box {
-            background-color: #e9f7fe;
-            border-left: 4px solid #007bff;
-            padding: 15px;
-            margin: 20px 0;
-        }
-    </style>
-</head>
-<body>
-    <h1>JWT Token for API Authentication</h1>
+    }).encode('utf-8')]
+
+def application(environ, start_response):
+    """WSGI application for JSON processing and backend forwarding."""
+    headers = [('Content-Type', 'application/json')]
     
-    <div id="login-section">
-        <p>You need to authenticate to get your JWT token for using the API:</p>
-        <a href="/get-token" class="login-button">Authenticate with SSO</a>
-        
-        <div class="info-box">
-            <p><strong>Note:</strong> Clicking the button above will redirect you to your organization's Single Sign-On page. After successful authentication, you'll be redirected back here with your token.</p>
-        </div>
-    </div>
+    # Check JWT token
+    jwt_token = None
+    for key, value in environ.items():
+        if key.startswith('HTTP_') and key[5:].lower() == 'x_jwt_token':
+            jwt_token = value
+            break
+    jwt_token = jwt_token or ''
+    if not jwt_token:
+        logging.error("Missing JWT token")
+        headers.append(('Location', REDIRECT_URL))
+        start_response('302 Found', headers)
+        return [b'']
+    if not validate_jwt(jwt_token):
+        logging.error("Invalid JWT token")
+        headers.append(('Location', REDIRECT_URL))
+        start_response('302 Found', headers)
+        return [b'']
+
+    # Ensure POST request
+    if environ.get('REQUEST_METHOD') != 'POST':
+        headers.append(('Allow', 'POST'))
+        return error_response("Method not allowed", '405 Method Not Allowed', headers)
+
+    # Validate Content-Type
+    if environ.get('CONTENT_TYPE') != 'application/json':
+        return error_response("Content-Type must be application/json", '415 Unsupported Media Type', headers)
+
+    # Read JSON payload
+    content_length = environ.get('CONTENT_LENGTH')
+    if content_length is None or not content_length.isdigit():
+        return error_response("Content-Length required", '411 Length Required', headers)
+    length = int(content_length)
+    if length > MAX_PAYLOAD_SIZE:
+        return error_response("Payload too large", '413 Payload Too Large', headers)
     
-    <div id="token-section" class="hidden">
-        <p>Your JWT token has been generated successfully. Use this token to authenticate with the API:</p>
-        <div class="token" id="token">%OIDC_id_token%</div>
-        <button onclick="copyToken()">Copy to Clipboard</button>
-        
-        <h2>Example Usage</h2>
-        <pre>
-from openai import OpenAI
-client = OpenAI(
-    api_key="dummy-value-not-used",
-    base_url="https://api.bank.com/",
-    default_headers={"X-JWT-Token": "YOUR_TOKEN_HERE"}
-)
-# For completions
-completion = client.chat.completions.create(
-    model="mixtral",
-    messages=[{"role": "user", "content": "Hello"}]
-)
-# For embeddings
-embedding = client.embeddings.create(
-    model="jina",
-    input="Hello world"
-)
-        </pre>
-        
-        <h2>Token Details</h2>
-        <pre id="token-details"></pre>
-    </div>
-    
-    <script>
-        // Check if we have a token
-        document.addEventListener("DOMContentLoaded", function() {
-            const token = document.getElementById("token").innerText;
-            if (token && token !== "%OIDC_id_token%" && token.trim() !== "") {
-                // Show token section
-                document.getElementById("login-section").classList.add("hidden");
-                document.getElementById("token-section").classList.remove("hidden");
-                
-                // Parse and display token details
-                try {
-                    const tokenParts = token.split('.');
-                    if (tokenParts.length >= 2) {
-                        const payload = JSON.parse(atob(tokenParts[1]));
-                        document.getElementById("token-details").textContent = JSON.stringify(payload, null, 2);
-                    }
-                } catch (e) {
-                    console.error("Error parsing token:", e);
-                }
-            }
-        });
-        
-        function copyToken() {
-            const token = document.getElementById("token").innerText;
-            navigator.clipboard.writeText(token).then(() => {
-                alert("Token copied to clipboard!");
-            });
-        }
-    </script>
-</body>
-</html>
+    try:
+        body = environ['wsgi.input'].read(length).decode('utf-8')
+        data = json.loads(body) if body else {}
+    except (ValueError, json.JSONDecodeError) as e:
+        return error_response(f"Invalid JSON: {str(e)}", '400 Bad Request', headers)
+
+    # Extract model name
+    model_name = data.get('model') or data.get('config', {}).get('model')
+    if not model_name:
+        return error_response("Missing model field", '400 Bad Request', headers)
+
+    logging.info(f"Processed model: {model_name}")
+    headers.append(('X-Model-Name', model_name))  # Pass model name to backend
+
+    # Return response
+    start_response('200 OK', headers)
+    return [json.dumps({
+        "status": "Request accepted",
+        "model": model_name
+    }).encode('utf-8')]
