@@ -15,6 +15,19 @@
     RequestHeader set X-Original-Model "%{ENV:MODEL_NAME}e"
 </Location>
 
+<Location /get-token>
+    AuthType openid-connect
+    Require valid-user
+    
+    # Instead of using ErrorDocument 200, use these directives:
+    Header set Content-Type "text/html; charset=UTF-8"
+    RewriteEngine On
+    RewriteRule ^/get-token$ /var/www/html/token.html [L]
+    
+    # Set environment variables for the token template
+    SetEnvIf Request_URI "^/get-token" SHOW_TOKEN=true
+</Location>
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
