@@ -1,27 +1,218 @@
-# PingFederate SSO configuration - Manual approach
-OIDCProviderIssuer https://pingfederate.yourbank.com
-OIDCProviderAuthorizationEndpoint https://pingfederate.yourbank.com/as/authorization.oauth2
-OIDCProviderTokenEndpoint https://pingfederate.yourbank.com/as/token.oauth2
-OIDCProviderUserInfoEndpoint https://pingfederate.yourbank.com/idp/userinfo.openid
-OIDCProviderJwksUri https://pingfederate.yourbank.com/.well-known/jwks.json
+# Add this to your httpd.conf or a separate conf file
 
-# Client configuration
-OIDCClientID your_client_id
-OIDCClientSecret your_client_secret
-OIDCRedirectURI https://api.bank.com/jwt-callback
-OIDCCryptoPassphrase some-random-secure-passphrase
+# Test token endpoint - No SSO authentication required
+<Location /test-token>
+    # Explicitly disable authentication
+    AuthType None
+    Require all granted
+    
+    # Set dummy OIDC values for testing
+    SetEnvIf Request_URI "^/test-token" OIDC_id_token="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0LXVzZXIiLCJuYW1lIjoiVGVzdCBVc2VyIiwiZW1haWwiOiJ0ZXN0QGV4YW1wbGUuY29tIiwiaWF0IjoxNTE2MjM5MDIyLCJleHAiOjE2MTYyMzkwMjJ9.4-0D_N-jSTuNQyW_I73bs59T0JcYTlcAYzYxSsHV4aU"
+    SetEnvIf Request_URI "^/test-token" OIDC_CLAIM_email="test@example.com"
+    SetEnvIf Request_URI "^/test-token" OIDC_CLAIM_name="Test User"
+    
+    # Serve the token page directly
+    RewriteEngine On
+    RewriteRule ^/test-token$ /var/www/html/token.html [L]
+</Location>
 
-# Session settings
-OIDCSessionInactivityTimeout 3600
-OIDCSessionMaxDuration 28800
+import os
+import json
+import logging
+import requests
+from jwt import decode as jwt_decode, get_unverified_header, InvalidTokenError
 
-# Scope and claims
-OIDCScope "openid email profile"
-OIDCRemoteUserClaim sub
-OIDCResponseType "id_token token"
+# Configure logging with rotation
+from logging.handlers import RotatingFileHandler
+handler = RotatingFileHandler(
+    os.getenv('LOG_FILE', '/var/log/api.log'),
+    maxBytes=10*1024*1024,
+    backupCount=5
+)
+logging.basicConfig(handlers=[handler], level=logging.INFO)
 
-# SSL and token handling
-OIDCSSLValidateServer On
-OIDCPassIDTokenAs claims
-OIDCPassClaimsAs environment
-OIDCPassRefreshToken On
+# Configuration
+JWKS_URL = os.getenv('JWKS_URL', 'https://pingfederate.yourbank.com/.well-known/jwks.json')
+AUDIENCE = os.getenv('AUDIENCE', 'your_client_id')
+ISSUER = os.getenv('ISSUER', 'https://pingfederate.yourbank.com')
+REDIRECT_URL = os.getenv('JWT_REDIRECT_URL', '/jwt-callback')
+MAX_PAYLOAD_SIZE = 1024 * 1024  # 1MB
+
+def validate_jwt(token):
+    """Validate JWT using PingFederate's JWKS endpoint."""
+    try:
+        jwks = requests.get(JWKS_URL, timeout=5, verify=True).json()
+        header = get_unverified_header(token)
+        kid = header['kid']
+        key = next(k for k in jwks['keys'] if k['kid'] == kid)
+        decoded = jwt_decode(
+            token,
+            key,
+            algorithms=['RS256'],
+            audience=AUDIENCE,
+            issuer=ISSUER
+        )
+        return decoded
+    except (requests.RequestException, InvalidTokenError, KeyError, StopIteration) as e:
+        logging.error(f"JWT validation failed: {str(e)}")
+        return None
+
+def error_response(message, status, headers, start_response):
+    """Return a standardized error response."""
+    logging.error(message)
+    start_response(status, headers)
+    return [json.dumps({
+        "error": {
+            "message": message,
+            "type": "invalid_request_error",
+            "param": None,
+            "code": None
+        }
+    }).encode('utf-8')]
+
+# ===== BEGIN TEST FUNCTIONALITY =====
+# You can remove this entire function if you want to delete test functionality
+def handle_test_request(environ, start_response):
+    """Handle test requests without JWT validation."""
+    logging.info("Handling test request - bypassing JWT validation")
+    headers = [('Content-Type', 'application/json')]
+    
+    # Handle different HTTP methods
+    request_method = environ.get('REQUEST_METHOD', '')
+    
+    # For test endpoint, we still enforce POST for API consistency
+    if request_method != 'POST':
+        headers.append(('Allow', 'POST'))
+        return error_response("Method not allowed", '405 Method Not Allowed', headers, start_response)
+    
+    # Read JSON payload
+    try:
+        content_length = environ.get('CONTENT_LENGTH')
+        if not content_length:
+            length = 0
+        else:
+            length = int(content_length)
+        
+        body = environ['wsgi.input'].read(length).decode('utf-8')
+        data = json.loads(body) if body else {}
+    except (ValueError, json.JSONDecodeError) as e:
+        return error_response(f"Invalid JSON: {str(e)}", '400 Bad Request', headers, start_response)
+
+    # Extract model name
+    model_name = data.get('model') or data.get('config', {}).get('model')
+    if not model_name:
+        return error_response("Missing model field", '400 Bad Request', headers, start_response)
+
+    # Log test request
+    logging.info(f"TEST MODE: Processed model: {model_name}")
+    
+    # Pass through the original JSON unchanged to maintain OpenAI/embedding compatibility
+    # Just add headers to indicate test mode
+    headers.append(('X-Test-Mode', 'true'))
+
+    # Set MODEL_NAME environment variable for Apache routing
+    os.environ['MODEL_NAME'] = model_name
+    
+    # Return success response - keeping the exact same format as normal requests
+    start_response('200 OK', headers)
+    return [json.dumps({
+        "status": "Request processed",
+        "model": model_name,
+        "message": "Forwarding to backend via Apache proxy"
+    }).encode('utf-8')]
+# ===== END TEST FUNCTIONALITY =====
+
+def application(environ, start_response):
+    """WSGI application for JSON processing and backend forwarding."""
+    path_info = environ.get('PATH_INFO', '')
+    request_method = environ.get('REQUEST_METHOD', '')
+    
+    # ===== BEGIN TEST ENDPOINT CHECK =====
+    # Remove these lines if you want to delete test functionality
+    if path_info == '/test' or environ.get('HTTP_X_TEST_MODE') == 'true':
+        return handle_test_request(environ, start_response)
+    # ===== END TEST ENDPOINT CHECK =====
+    
+    # Normal request processing with JWT validation
+    headers = [('Content-Type', 'application/json')]
+    
+    # Check JWT token
+    jwt_token = None
+    for key, value in environ.items():
+        if key.startswith('HTTP_') and key[5:].lower() == 'x_jwt_token':
+            jwt_token = value
+            break
+    jwt_token = jwt_token or ''
+    
+    # If no JWT or invalid JWT, redirect to auth
+    if not jwt_token:
+        logging.error("Missing JWT token")
+        headers.append(('Location', REDIRECT_URL))
+        start_response('302 Found', headers)
+        return [b'']
+    if not validate_jwt(jwt_token):
+        logging.error("Invalid JWT token")
+        headers.append(('Location', REDIRECT_URL))
+        start_response('302 Found', headers)
+        return [b'']
+    
+    # Support different HTTP methods
+    if request_method == 'GET':
+        # Handle GET request - simple status check
+        start_response('200 OK', headers)
+        return [json.dumps({
+            "status": "ok",
+            "message": "API is running"
+        }).encode('utf-8')]
+        
+    elif request_method == 'POST':
+        # Validate Content-Type
+        if environ.get('CONTENT_TYPE') != 'application/json':
+            return error_response("Content-Type must be application/json", '415 Unsupported Media Type', headers, start_response)
+
+        # Read JSON payload
+        content_length = environ.get('CONTENT_LENGTH')
+        if content_length is None or not content_length.isdigit():
+            return error_response("Content-Length required", '411 Length Required', headers, start_response)
+        length = int(content_length)
+        if length > MAX_PAYLOAD_SIZE:
+            return error_response("Payload too large", '413 Payload Too Large', headers, start_response)
+        
+        try:
+            body = environ['wsgi.input'].read(length).decode('utf-8')
+            data = json.loads(body) if body else {}
+        except (ValueError, json.JSONDecodeError) as e:
+            return error_response(f"Invalid JSON: {str(e)}", '400 Bad Request', headers, start_response)
+
+        # Extract model name (supports nested config)
+        model_name = data.get('model') or data.get('config', {}).get('model')
+        if not model_name:
+            return error_response("Missing model field", '400 Bad Request', headers, start_response)
+
+        # Set MODEL_NAME environment variable for Apache routing
+        os.environ['MODEL_NAME'] = model_name
+        logging.info(f"Processed model: {model_name}")
+
+        # Return response - keep exactly the same format to maintain compatibility
+        start_response('200 OK', headers)
+        return [json.dumps({
+            "status": "Request processed",
+            "model": model_name,
+            "message": "Forwarding to backend via Apache proxy"
+        }).encode('utf-8')]
+    
+    elif request_method == 'OPTIONS':
+        # Handle OPTIONS request for CORS
+        headers.extend([
+            ('Allow', 'GET, POST, OPTIONS'),
+            ('Access-Control-Allow-Origin', '*'),
+            ('Access-Control-Allow-Methods', 'GET, POST, OPTIONS'),
+            ('Access-Control-Allow-Headers', 'Content-Type, X-JWT-Token')
+        ])
+        start_response('204 No Content', headers)
+        return [b'']
+    
+    else:
+        # Handle other methods
+        headers.append(('Allow', 'GET, POST, OPTIONS'))
+        return error_response(f"Method {request_method} not allowed", '405 Method Not Allowed', headers, start_response)
