@@ -1,0 +1,38 @@
+## TESTING the proxy ###.
+LoadModule security2_module modules/mod_security2.so
+LoadModule proxy_module modules/mod_proxy.so
+LoadModule proxy_http_module modules/mod_proxy_http.so
+LoadModule rewrite_module modules/mod_rewrite.so
+LoadModule headers_module modules/mod_headers.so
+LoadModule unique_id_module modules/mod_unique_id.so
+LogLevel rewrite:trace3 proxy:debug
+<VirtualHost *:80>
+    ServerName 'webmod-prxy-cp-1920938.apps.conso.com'
+    ProxyPreserveHost On
+    <IfModule mod_security2.c>
+        SecRuleEngine On
+        SecAuditEngine RelevantOnly
+        SecRequestBodyAccess On
+        SecResponseBodyAccess Off
+        SecRequestBodyLimit 134217728
+        SecRequestBodyLimitAction ProcessPartial
+        SecRule REQUEST_HEADERS:Content-Type "application/json" "id:1000,pass,nolog,ctl:requestBodyProcessor=JSON"
+        SecRule REQUEST_BODY:model "@streq llama-2-70b-instruct" "id:2000,phase:2,pass,nolog,setvar:tx.model_route=llama,ctl:ruleEngine=DetectionOnly"
+        SecRule REQUEST_HEADERS:Authorization "^(?x %Bearer (.+)$)" "id:1001,phase:1,pass,nolog,setvar:tx.token=%{TX.1}"
+        SecRule TX:token "!@strmatch %{ENV.LLAMA_API_KEY}" "id:1002,phase:1,deny,status:403,msg:'Invalid API Token'"
+        PassEnv LLAMA_API_KEY
+        PassEnv JINA_API_KEY
+        PassEnv ESMIST_API_KEY
+        ErrorLog /var/log/httpd/webmod_pxy_error.log
+        CustomLog /var/log/httpd/webmod_pxy_access.log combined
+        SecDebugLogLevel 3
+        SecDebugLog /var/log/httpd/webmod_pxy_sec_debug.log
+        SecAuditLog /var/log/httpd/webmod_pxy_sec_audit.log
+    </IfModule>
+    RewriteEngine On
+    RewriteCond %{HTTP:X-Model-Route} ^llama$
+    RewriteRule ^/.* /llama [PT]
+    ProxyPass /llama http://labs-triton-1.cp-1920938.svc.cluster.local:9000/v1/chat/completions
+    RequestHeader set X-Forwarded-For %{REMOTE_ADDR}s
+    RequestHeader set X-Model-Route "%{TX_model_route}e" env=TX.model_route
+</VirtualHost>
