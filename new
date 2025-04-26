@@ -1,1 +1,141 @@
+<Location /test-token>
+    # No auth required for testing
+    Header set Content-Type "text/html; charset=UTF-8"
+    RewriteEngine On
+    RewriteRule ^/test-token$ /var/www/html/token.html [L]
+    
+    # Set a test token
+    SetEnv OIDC_id_token "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IlRlc3QgVXNlciIsImlhdCI6MTUxNjIzOTAyMiwiZXhwIjoxNjE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+</Location>
 
+<Location "/test">
+    ProxyPreserveHost On
+    RequestHeader set X-User-ID "test-user"
+    RequestHeader set X-JWT-Token "disabled-for-testing"
+    RequestHeader set X-Original-Model "%{ENV:MODEL_NAME}e"
+</Location>
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Get Your JWT Token</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 0 20px;
+            line-height: 1.6;
+        }
+        .token {
+            background: #f4f4f4;
+            padding: 15px;
+            border: 1px solid #ccc;
+            word-break: break-all;
+            margin: 20px 0;
+            font-family: monospace;
+        }
+        .login-button, button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            cursor: pointer;
+            border-radius: 4px;
+            font-size: 16px;
+            margin: 20px 0;
+        }
+        .login-button:hover, button:hover {
+            background: #0056b3;
+        }
+        .hidden {
+            display: none;
+        }
+        pre {
+            background: #f4f4f4;
+            padding: 15px;
+            border: 1px solid #ccc;
+            overflow-x: auto;
+        }
+        .info-box {
+            background-color: #e9f7fe;
+            border-left: 4px solid #007bff;
+            padding: 15px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>JWT Token for API Authentication</h1>
+    
+    <div id="login-section">
+        <p>You need to authenticate to get your JWT token for using the API:</p>
+        <a href="/get-token" class="login-button">Authenticate with SSO</a>
+        
+        <div class="info-box">
+            <p><strong>Note:</strong> Clicking the button above will redirect you to your organization's Single Sign-On page. After successful authentication, you'll be redirected back here with your token.</p>
+        </div>
+    </div>
+    
+    <div id="token-section" class="hidden">
+        <p>Your JWT token has been generated successfully. Use this token to authenticate with the API:</p>
+        <div class="token" id="token">%OIDC_id_token%</div>
+        <button onclick="copyToken()">Copy to Clipboard</button>
+        
+        <h2>Example Usage</h2>
+        <pre>
+from openai import OpenAI
+client = OpenAI(
+    api_key="dummy-value-not-used",
+    base_url="https://api.bank.com/",
+    default_headers={"X-JWT-Token": "YOUR_TOKEN_HERE"}
+)
+# For completions
+completion = client.chat.completions.create(
+    model="mixtral",
+    messages=[{"role": "user", "content": "Hello"}]
+)
+# For embeddings
+embedding = client.embeddings.create(
+    model="jina",
+    input="Hello world"
+)
+        </pre>
+        
+        <h2>Token Details</h2>
+        <pre id="token-details"></pre>
+    </div>
+    
+    <script>
+        // Check if we have a token
+        document.addEventListener("DOMContentLoaded", function() {
+            const token = document.getElementById("token").innerText;
+            if (token && token !== "%OIDC_id_token%" && token.trim() !== "") {
+                // Show token section
+                document.getElementById("login-section").classList.add("hidden");
+                document.getElementById("token-section").classList.remove("hidden");
+                
+                // Parse and display token details
+                try {
+                    const tokenParts = token.split('.');
+                    if (tokenParts.length >= 2) {
+                        const payload = JSON.parse(atob(tokenParts[1]));
+                        document.getElementById("token-details").textContent = JSON.stringify(payload, null, 2);
+                    }
+                } catch (e) {
+                    console.error("Error parsing token:", e);
+                }
+            }
+        });
+        
+        function copyToken() {
+            const token = document.getElementById("token").innerText;
+            navigator.clipboard.writeText(token).then(() => {
+                alert("Token copied to clipboard!");
+            });
+        }
+    </script>
+</body>
+</html>
