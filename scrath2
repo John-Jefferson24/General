@@ -105,16 +105,8 @@ requirements.txt
 pyjwt==2.9.0
 requests==2.32.3
 
-httpd.conf > /etc/httpd/conf/httpd.conf
-
-# Main Apache configuration
-Listen 8080
-ServerName api.bank.com
-
-# Include modular configurations
-Include /etc/httpd/conf.d/security.conf
-Include /etc/httpd/conf.d/sso.conf
-Include /etc/httpd/conf.d/routing.conf
+httpd.conf > /etc/httpd/conf.d/httpd.conf
+LoadModule wsgi_modfule modules/mod_wsgi_python3.so
 
 # WSGI configuration for Python script
 WSGIDaemonProcess api user=apache group=apache threads=5 python-home=/usr/bin/python3
@@ -167,7 +159,6 @@ LoadModule security2_module modules/mod_security2.so
     SecRequestBodyLimit 1048576
     SecRequestBodyNoFilesLimit 1048576
     SecAuditEngine RelevantOnly
-    SecAuditLog /var/log/modsecurity/audit.log
 
     # Validate JSON format for POST requests
     SecRule REQUEST_METHOD "^POST$" \
@@ -224,7 +215,7 @@ RUN yum install -y python3 python3-pip mod_security mod_wsgi && \
     yum clean all
 
 # Install mod_auth_openidc
-RUN yum install -y https://github.com/OpenIDC/mod_auth_openidc/releases/download/v2.4.15.7/mod_auth_openidc-2.4.15.7-1.el8.x86_64.rpm && \
+RUN yum install -y mod_auth_openidc && \
     yum clean all
 
 # Copy application files
