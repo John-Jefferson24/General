@@ -1,15 +1,97 @@
-ENV PYTHONHOME=/usr
-ENV PYTHONPATH=/usr/lib/python3.9:/usr/lib/python3.9/lib-dynload:/usr/lib/python3.9/site-packages
+## TESTING the proxy ###.
+# Load required modules
+LoadModule security2_module modules/mod_security2.so
+LoadModule proxy_module modules/mod_proxy.so
+LoadModule proxy_http_module modules/mod_proxy_http.so
+LoadModule rewrite_module modules/mod_rewrite.so
+LoadModule headers_module modules/mod_headers.so
+LoadModule unique_id_module modules/mod_unique_id.so
 
-LoadModule wsgi_module modules/mod_wsgi_python3.so
+LogLevel rewrite:trace3 proxy:debug
 
-# WSGI configuration for Python script
-WSGIDaemonProcess api user=apache group=apache threads=5 python-home=/usr
-WSGIScriptAlias / /var/www/html/api.py
-WSGIPythonPath /usr/lib/python3.9:/usr/lib/python3.9/lib-dynload:/usr/lib/python3.9/site-packages
-
-<Directory /var/www/html>
-    WSGIProcessGroup api
-    WSGIApplicationGroup %{GLOBAL}
-    Require all granted
-</Directory>
+<VirtualHost *:80>
+    ServerName 'webmod-prxy-cp-1920938.apps.uswest70.bofa.com'
+    ProxyPreserveHost On
+    
+    # Use API key from environment variable (mounted as secret)
+    PassEnv API_KEY
+    
+    <IfModule mod_security2.c>
+        SecRuleEngine On
+        SecAuditEngine RelevantOnly
+        SecRequestBodyAccess On
+        SecResponseBodyAccess Off
+        SecRequestBodyLimit 134217728
+        SecRequestBodyLimitAction ProcessPartial
+        
+        # Set JSON processor for appropriate content type but don't modify the content
+        SecRule REQUEST_HEADERS:Content-Type "application/json" "id:1000,pass,nolog,ctl:requestBodyProcessor=JSON"
+        
+        # Extract model name from request body and set appropriate model route
+        SecRule REQUEST_BODY:model "@rx llama-70b" "id:2001,phase:2,pass,nolog,setenv:MODEL_NAME=llama-70b"
+        SecRule REQUEST_BODY:model "@rx mixtral" "id:2002,phase:2,pass,nolog,setenv:MODEL_NAME=mixtral"
+        SecRule REQUEST_BODY:model "@rx mistral" "id:2003,phase:2,pass,nolog,setenv:MODEL_NAME=mistral"
+        SecRule REQUEST_BODY:model "@rx jina" "id:2004,phase:2,pass,nolog,setenv:MODEL_NAME=jina"
+        SecRule REQUEST_BODY:model "@rx e5-mistral" "id:2005,phase:2,pass,nolog,setenv:MODEL_NAME=e5-mistral"
+        
+        # Extract and validate API token
+        SecRule REQUEST_HEADERS:Authorization "^(?x %Bearer (.+)$)" "id:1001,phase:1,pass,nolog,setvar:tx.token=%{TX.1}"
+        
+        # Single API key validation for all models
+        SecRule TX:token "!@strmatch %{ENV.API_KEY}" "id:1002,phase:1,deny,status:403,msg:'Invalid API Token'"
+        
+        # Logging configuration
+        ErrorLog /var/log/httpd/webmod_pxy_error.log
+        CustomLog /var/log/httpd/webmod_pxy_access.log combined
+        SecDebugLogLevel 3
+        SecDebugLog /var/log/httpd/webmod_pxy_sec_debug.log
+        SecAuditLog /var/log/httpd/webmod_pxy_sec_audit.log
+    </IfModule>
+    
+    # Routing rules based on MODEL_NAME
+    RewriteEngine On
+    
+    # Preserve query string and ensure proper content transfer
+    ProxyPassReverse / /
+    
+    # Chat Completion Models (OpenAI-compatible /v1/chat/completions)
+    RewriteCond %{ENV:MODEL_NAME} ^llama-70b$
+    RewriteRule ^/(.*)$ http://triton-1.app.svc.cluster.local:9000/$1 [P,L,QSA]
+    
+    RewriteCond %{ENV:MODEL_NAME} ^mixtral$
+    RewriteRule ^/(.*)$ http://triton-1.app.svc.cluster.local:9000/$1 [P,L,QSA]
+    
+    RewriteCond %{ENV:MODEL_NAME} ^mistral$
+    RewriteRule ^/(.*)$ http://triton-1.app.svc.cluster.local:9000/$1 [P,L,QSA]
+    
+    # Embedding Models (Triton PyTorch /v2/models/X/generate)
+    RewriteCond %{ENV:MODEL_NAME} ^jina$
+    RewriteRule ^/(.*)$ http://triton-2.apps.svc.cluster.local:8000/v2/models/jina_embedding/generate [P,L,QSA]
+    
+    RewriteCond %{ENV:MODEL_NAME} ^e5-mistral$
+    RewriteRule ^/(.*)$ http://triton-2.apps.svc.cluster.local:8000/v2/models/e5_mistral_embedding/generate [P,L,QSA]
+    
+    # Default routing (assume chat completion)
+    RewriteCond %{ENV:MODEL_NAME} ^$
+    RewriteRule ^/(.*)$ http://triton-1.app.svc.cluster.local:9000/$1 [P,L,QSA]
+    
+    # Add headers for proxying but preserve original request format
+    RequestHeader set X-Forwarded-For %{REMOTE_ADDR}s
+    RequestHeader set X-Model-Route "%{MODEL_NAME}e" env=MODEL_NAME
+    
+    # Ensure proper JSON content handling
+    # Don't manipulate the content-type if it's already set
+    RequestHeader unset Content-Length
+    
+    # Critical settings for streaming support
+    SetEnv proxy-initial-not-pooled 1
+    SetEnv force-proxy-request-1.0 1
+    SetEnv proxy-nokeepalive 1
+    
+    # Don't buffer responses - important for streaming
+    SetEnv proxy-buffering off
+    
+    # Ensure proper connection handling
+    ProxyTimeout 300
+    TimeOut 300
+</VirtualHost>
