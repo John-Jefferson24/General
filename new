@@ -1,2 +1,5 @@
 ENV PYTHONHOME=/usr
 ENV PYTHONPATH=/usr/lib/python3.9:/usr/lib/python3.9/lib-dynload:/usr/lib/python3.9/site-packages
+
+WSGIPythonHome /usr
+WSGIPythonPath /usr/lib/python3.9
