@@ -2,7 +2,6 @@ import os
 import json
 import logging
 import requests
-import subprocess
 from jwt import decode as jwt_decode, get_unverified_header, InvalidTokenError
 
 # Configure logging with rotation
@@ -19,7 +18,6 @@ JWKS_URL = os.getenv('JWKS_URL', 'https://pingfederate.yourbank.com/.well-known/
 AUDIENCE = os.getenv('AUDIENCE', 'your_client_id')
 ISSUER = os.getenv('ISSUER', 'https://pingfederate.yourbank.com')
 REDIRECT_URL = os.getenv('JWT_REDIRECT_URL', '/jwt-callback')
-MAX_PAYLOAD_SIZE = 1024 * 1024  # 1MB
 
 def validate_jwt(token):
     """Validate JWT using PingFederate's JWKS endpoint."""
@@ -53,93 +51,47 @@ def error_response(message, status, headers, start_response):
         }
     }).encode('utf-8')]
 
-def set_model_env_var(model_name):
-    """
-    Properly set the MODEL_NAME environment variable for Apache.
-    
-    This ensures the environment variable is correctly passed to Apache's
-    rewrite module for routing purposes.
-    """
-    # Setting in os.environ (works for this process)
-    os.environ['MODEL_NAME'] = model_name
-    
-    # Also set Apache-specific environment variable
-    # This creates an Apache note that can be referenced in rewrite rules
-    subprocess.call(['setenv', 'MODEL_NAME', model_name], shell=True)
-    
-    # Log the model setting
-    logging.info(f"Set MODEL_NAME to: {model_name}")
-    return model_name
-
 # ===== BEGIN TEST FUNCTIONALITY =====
 # You can remove this entire function if you want to delete test functionality
 def handle_test_request(environ, start_response):
     """Handle test requests without JWT validation."""
     logging.info("Handling test request - bypassing JWT validation")
-    headers = [
-        ('Content-Type', 'application/json'),
-        # Add header to be used by Apache for routing
-        ('X-Model-Name', ''),  # Will be filled in later
-        ('X-Test-Mode', 'true')
-    ]
+    headers = [('Content-Type', 'application/json')]
     
-    # Handle different HTTP methods
-    request_method = environ.get('REQUEST_METHOD', '')
-    
-    # For test endpoint, we still enforce POST for API consistency
-    if request_method != 'POST':
-        headers.append(('Allow', 'POST'))
-        return error_response("Method not allowed", '405 Method Not Allowed', headers, start_response)
-    
-    # Read JSON payload
+    # Parse JSON body
     try:
-        content_length = environ.get('CONTENT_LENGTH')
-        if not content_length:
-            length = 0
-        else:
-            length = int(content_length)
-        
-        body = environ['wsgi.input'].read(length).decode('utf-8')
+        content_length = int(environ.get('CONTENT_LENGTH', 0))
+        body = environ['wsgi.input'].read(content_length).decode('utf-8')
         data = json.loads(body) if body else {}
     except (ValueError, json.JSONDecodeError) as e:
         return error_response(f"Invalid JSON: {str(e)}", '400 Bad Request', headers, start_response)
 
-    # Extract model name
-    model_name = data.get('model') or data.get('config', {}).get('model')
+    # Extract model name - works for both completions and embeddings
+    model_name = data.get('model')
     if not model_name:
         return error_response("Missing model field", '400 Bad Request', headers, start_response)
 
-    # Set the model name in headers for Apache to use in routing
-    for i, (header, value) in enumerate(headers):
-        if header == 'X-Model-Name':
-            headers[i] = ('X-Model-Name', model_name)
-            break
+    # Set MODEL_NAME for Apache routing
+    os.environ['MODEL_NAME'] = model_name
     
-    # Set the MODEL_NAME environment variable properly
-    set_model_env_var(model_name)
+    # Add header for Apache routing
+    headers.append(('X-Original-Model', model_name))
     
-    # Add test info to log
+    # Log test request
     logging.info(f"TEST MODE: Processed model: {model_name}")
     
-    # Return a special header that instructs Apache to do the actual proxying
-    headers.append(('X-Do-Proxy', 'true'))
-    
-    # Also pass as environment variable
-    environ['X_DO_PROXY'] = 'true'
-    
-    # Output a message but don't actually return content - Apache should rewrite
+    # Return standard response
     start_response('200 OK', headers)
     return [json.dumps({
-        "status": "Request is being processed in test mode",
+        "status": "Request processed",
         "model": model_name,
-        "message": "Request will be forwarded to model backend"
+        "message": "Forwarding to backend via Apache proxy"
     }).encode('utf-8')]
 # ===== END TEST FUNCTIONALITY =====
 
 def application(environ, start_response):
     """WSGI application for JSON processing and backend forwarding."""
     path_info = environ.get('PATH_INFO', '')
-    request_method = environ.get('REQUEST_METHOD', '')
     
     # ===== BEGIN TEST ENDPOINT CHECK =====
     # Remove these lines if you want to delete test functionality
@@ -147,111 +99,64 @@ def application(environ, start_response):
         return handle_test_request(environ, start_response)
     # ===== END TEST ENDPOINT CHECK =====
     
-    # Normal request processing with JWT validation
     headers = [('Content-Type', 'application/json')]
     
-    # Check JWT token
+    # Check JWT token from various possible sources
     jwt_token = None
+    
+    # Method 1: X-JWT-Token header (used by Python clients like OpenAI/LangChain)
     for key, value in environ.items():
         if key.startswith('HTTP_') and key[5:].lower() == 'x_jwt_token':
             jwt_token = value
             break
-    jwt_token = jwt_token or ''
     
-    # If no JWT or invalid JWT, redirect to auth
-    if not jwt_token:
-        logging.error("Missing JWT token")
-        headers.append(('Location', REDIRECT_URL))
-        start_response('302 Found', headers)
-        return [b'']
-    if not validate_jwt(jwt_token):
-        logging.error("Invalid JWT token")
-        headers.append(('Location', REDIRECT_URL))
-        start_response('302 Found', headers)
-        return [b'']
+    # Method 2: Authorization header with Bearer token (common API pattern)
+    if not jwt_token and 'HTTP_AUTHORIZATION' in environ:
+        auth = environ['HTTP_AUTHORIZATION']
+        if auth.startswith('Bearer '):
+            jwt_token = auth[7:]  # Remove 'Bearer ' prefix
     
-    # Support different HTTP methods
-    if request_method == 'GET':
-        # Handle GET request - simple status check
-        start_response('200 OK', headers)
+    # If no token found or invalid token - return 401 (no redirect)
+    if not jwt_token or not validate_jwt(jwt_token):
+        if not jwt_token:
+            logging.error("Missing JWT token")
+        else:
+            logging.error("Invalid JWT token")
+            
+        # Return 401 with JSON error for API clients
+        start_response('401 Unauthorized', headers)
         return [json.dumps({
-            "status": "ok",
-            "message": "API is running"
-        }).encode('utf-8')]
-        
-    elif request_method == 'POST':
-        # Validate Content-Type
-        if environ.get('CONTENT_TYPE') != 'application/json':
-            return error_response("Content-Type must be application/json", '415 Unsupported Media Type', headers, start_response)
-
-        # Read JSON payload
-        content_length = environ.get('CONTENT_LENGTH')
-        if content_length is None or not content_length.isdigit():
-            return error_response("Content-Length required", '411 Length Required', headers, start_response)
-        length = int(content_length)
-        if length > MAX_PAYLOAD_SIZE:
-            return error_response("Payload too large", '413 Payload Too Large', headers, start_response)
-        
-        try:
-            body = environ['wsgi.input'].read(length).decode('utf-8')
-            data = json.loads(body) if body else {}
-        except (ValueError, json.JSONDecodeError) as e:
-            return error_response(f"Invalid JSON: {str(e)}", '400 Bad Request', headers, start_response)
-
-        # Extract model name (supports nested config)
-        model_name = data.get('model') or data.get('config', {}).get('model')
-        if not model_name:
-            return error_response("Missing model field", '400 Bad Request', headers, start_response)
-
-        # Set MODEL_NAME environment variable for Apache routing
-        set_model_env_var(model_name)
-        
-        # Add model header for Apache routing
-        headers.append(('X-Model-Name', model_name))
-        
-        # Return response - keep exactly the same format to maintain compatibility
-        start_response('200 OK', headers)
-        return [json.dumps({
-            "status": "Request processed",
-            "model": model_name,
-            "message": "Forwarding to backend via Apache proxy"
+            "error": {
+                "message": "Authentication required. Please provide a valid JWT token.",
+                "type": "authentication_error"
+            }
         }).encode('utf-8')]
     
-    elif request_method == 'OPTIONS':
-        # Handle OPTIONS request for CORS
-        headers.extend([
-            ('Allow', 'GET, POST, OPTIONS'),
-            ('Access-Control-Allow-Origin', '*'),
-            ('Access-Control-Allow-Methods', 'GET, POST, OPTIONS'),
-            ('Access-Control-Allow-Headers', 'Content-Type, X-JWT-Token')
-        ])
-        start_response('204 No Content', headers)
-        return [b'']
+    # Parse JSON body - minimal validation
+    try:
+        content_length = int(environ.get('CONTENT_LENGTH', 0))
+        body = environ['wsgi.input'].read(content_length).decode('utf-8')
+        data = json.loads(body) if body else {}
+    except (ValueError, json.JSONDecodeError) as e:
+        return error_response(f"Invalid JSON: {str(e)}", '400 Bad Request', headers, start_response)
+
+    # Extract model name - works for both completions and embeddings
+    model_name = data.get('model')
+    if not model_name:
+        return error_response("Missing model field", '400 Bad Request', headers, start_response)
+
+    # Set MODEL_NAME for Apache routing
+    os.environ['MODEL_NAME'] = model_name
     
-    else:
-        # Handle other methods
-        headers.append(('Allow', 'GET, POST, OPTIONS'))
-        return error_response(f"Method {request_method} not allowed", '405 Method Not Allowed', headers, start_response)
-
-
-# Load required modules
-LoadModule headers_module modules/mod_headers.so
-LoadModule env_module modules/mod_env.so
-
-# Allow passing environment variables from headers
-<IfModule mod_headers.c>
-    # Set environment variables from headers
-    SetEnvIf X-Model-Name "(.*)" MODEL_NAME=$1
-    SetEnvIf X-Test-Mode "(.*)" TEST_MODE=$1
-</IfModule>
-
-# Update your routing rules to check for headers as well
-<IfModule rewrite_module>
-    # First check header-based model name (highest priority)
-    RewriteCond %{HTTP:X-Model-Name} (.+)
-    RewriteRule .* - [E=MODEL_NAME:%1]
+    # Add header for Apache routing
+    headers.append(('X-Original-Model', model_name))
     
-    # Use environment variable as fallback
-    RewriteCond %{ENV:MODEL_NAME} ^$
-    RewriteCond %{HTTP_X_MODEL_NAME} (.+)
-    RewriteRule .* - [E=MODEL_NAME:%1]
+    logging.info(f"Processed model: {model_name}")
+
+    # Return intermediate response - Apache will handle proxying to the actual model
+    start_response('200 OK', headers)
+    return [json.dumps({
+        "status": "Request processed",
+        "model": model_name,
+        "message": "Forwarding to backend via Apache proxy"
+    }).encode('utf-8')]
