@@ -1,194 +1,122 @@
+# Token display endpoint - Allow unauthenticated access initially
+<Location /get-token>
+    # Initially allow access without authentication
+    <If "%{QUERY_STRING} =~ /auth=1/">
+        # Only require authentication when auth=1 is in the query string
+        AuthType openid-connect
+        Require valid-user
+    </If>
+    
+    Header set Content-Type "text/html; charset=UTF-8"
+    RewriteEngine On
+    RewriteRule ^/get-token$ /var/www/html/token.html [L]
+</Location>
+
+# Health check endpoint
+<Location /health>
+    SetHandler server-status
+</Location>
+
+# Apply SSO to root path for POST requests
+<LocationMatch "^/$">
+    AuthType openid-connect
+    Require valid-user
+    ProxyPreserveHost On
+    RequestHeader set X-User-ID "%{REMOTE_USER}e"
+    RequestHeader set X-JWT-Token "%{OIDC_id_token}e"
+    RequestHeader set X-Original-Model "%{ENV:MODEL_NAME}e"
+    
+    # Detect browser requests and redirect to token page
+    RewriteEngine On
+    RewriteCond %{HTTP_USER_AGENT} "Mozilla|Chrome|Safari|Firefox|Edge" [NC]
+    RewriteCond %{HTTP_ACCEPT} text/html [NC]
+    RewriteCond %{REQUEST_METHOD} GET [NC]
+    RewriteRule ^/$ /get-token [R,L]
+</LocationMatch>
+
+# Test endpoint (keep only if needed)
+<Location /test>
+    AuthType None
+    Require all granted
+    ProxyPreserveHost On
+    RequestHeader set X-User-ID "test-user"
+    RequestHeader set X-JWT-Token "disabled-for-testing"
+    RequestHeader set X-Original-Model "%{ENV:MODEL_NAME}e"
+</Location>
+
+# Standard API error responses in OpenAI format
+ErrorDocument 400 '{"error": {"message": "Bad request format", "type": "invalid_request_error", "param": null, "code": null}}'
+ErrorDocument 401 '{"error": {"message": "Authentication required", "type": "authentication_error", "param": null, "code": null}}'
+ErrorDocument 404 '{"error": {"message": "The requested resource was not found", "type": "invalid_request_error", "param": null, "code": null}}'
+ErrorDocument 500 '{"error": {"message": "The server had an error processing your request", "type": "server_error", "param": null, "code": null}}'
+
+
 # Load required modules
 LoadModule proxy_module modules/mod_proxy.so
 LoadModule proxy_http_module modules/mod_proxy_http.so
 LoadModule headers_module modules/mod_headers.so
 LoadModule rewrite_module modules/mod_rewrite.so
-LoadModule security2_module modules/mod_security2.so
-LoadModule auth_openidc_module modules/mod_auth_openidc.so
+LoadModule env_module modules/mod_env.so
 
-# Basic server settings
-ServerName api.example.com
+# Enable RewriteLog for debugging (comment out in production)
+# LogLevel alert rewrite:trace8
+# RewriteLog "/var/log/httpd/rewrite.log"
+# RewriteLogLevel 9
 
-# Ping Federate SSO configuration
-OIDCProviderMetadataURL https://pingfederate.yourbank.com/.well-known/openid-configuration
-OIDCClientID your_client_id
-OIDCClientSecret your_client_secret
-OIDCRedirectURI https://api.example.com/jwt-callback
-OIDCCryptoPassphrase some-random-secure-passphrase
-OIDCSessionInactivityTimeout 3600
-OIDCSessionMaxDuration 266000
+# IMPORTANT: Extract model name from header and set environment variable
+# This must be at the top level before any rewrite rules
+SetEnvIf X-Original-Model "(.+)" MODEL_NAME=$1
 
-# Required OIDC settings that were missing
-OIDCScope "openid email profile"
-OIDCRemoteUserClaim sub
-OIDCResponseType "id_token token"
-OIDCSSLValidateServer On
-OIDCPassIDTokenAs claims
-OIDCPassClaimsAs environment
-OIDCPassRefreshToken On
+# Make sure the MODEL_NAME environment variable is available
+# to all phases of request processing
+PassEnv MODEL_NAME
 
-# Token display endpoint - No JWT auth required here
-<Location /get-token>
-    AuthType openid-connect
-    Require valid-user
+# Force explicit extraction of model name from headers at beginning of request
+<IfModule rewrite_module>
+    RewriteEngine On
+    RewriteMap lowercase int:tolower
     
-    # This simple handler produces a basic HTML page with the token
-    SetHandler type-map
+    # Extract model from header if present
+    RewriteCond %{HTTP:X-Original-Model} (.+)
+    RewriteRule ^ - [E=MODEL_NAME:%1,NE]
     
-    # Create a simple HTML response with the token
-    ErrorDocument 200 /token.html
-</Location>
-
-# Simple health check endpoint - No JWT auth required here
-<Location /health>
-    # No authentication for health check - Apache 2.4 compatible syntax
-    Require all granted
-    
-    # Return basic health status
-    SetHandler server-status
-</Location>
-
-# Enable mod_security for JSON inspection
-<IfModule security2_module>
-    SecRuleEngine On
-    SecRequestBodyAccess On
-    SecRequestBodyLimit 13107200
-    SecRequestBodyNoFilesLimit 13107200
-    
-    # Extract model name from JSON body
-    SecRule REQUEST_METHOD "^POST$" \
-        "id:1001,\
-        phase:2,\
-        nolog,\
-        pass,\
-        chain"
-    SecRule REQUEST_BODY "@rx \"model\"\s*:\s*\"([^\"]+)\"" \
-        "capture,\
-        setvar:tx.model_name=%{TX.1},\
-        nolog,\
-        pass"
-    
-    # Set model name as environment variable
-    SecRule TX:model_name "!^$" \
-        "id:1002,\
-        phase:2,\
-        nolog,\
-        pass,\
-        setenv:MODEL_NAME=%{TX.model_name}"
-    
-    # FIXED: Verify request has valid OpenAI format with properly structured chain rule
-    # The first rule sets up the condition, second rule performs the disruptive action
-    SecRule REQUEST_BODY "!@rx \"(messages|input)\"" \
-        "id:1003,\
-        phase:2,\
-        chain,\
-        log,\
-        msg:'Bad Request: Missing required fields in request body'"
-        SecRule REQUEST_URI ".*" \
-            "t:none,\
-            deny,\
-            status:400"
-    
-    # Route to specific model services with their specific URL patterns
-    # Completion Models (using OpenAI-compatible /v1/chat/completions path)
-    SecRule TX:model_name "@contains llama-70b" \
-        "id:2001,\
-        phase:2,\
-        nolog,\
-        pass,\
-        setenv:MODEL_SERVICE=triton-1.app.svc.bank.com:9000,\
-        setenv:MODEL_PATH=/v1/chat/completions"
-        
-    SecRule TX:model_name "@contains mixtral" \
-        "id:2002,\
-        phase:2,\
-        nolog,\
-        pass,\
-        setenv:MODEL_SERVICE=triton-1.app.svc.bank.com:9000,\
-        setenv:MODEL_PATH=/v1/chat/completions"
-        
-    SecRule TX:model_name "@contains mistral" \
-        "id:2003,\
-        phase:2,\
-        nolog,\
-        pass,\
-        chain"
-    SecRule TX:model_name "!@contains e5-mistral" \
-        "nolog,\
-        pass,\
-        setenv:MODEL_SERVICE=triton-1.app.svc.bank.com:9000,\
-        setenv:MODEL_PATH=/v1/chat/completions"
-        
-    # Embedding Models (using Triton's /v2/models/X/generate path)
-    SecRule TX:model_name "@contains jina" \
-        "id:2004,\
-        phase:2,\
-        nolog,\
-        pass,\
-        setenv:MODEL_SERVICE=triton-2.apps.bank.com:8000,\
-        setenv:MODEL_PATH=/v2/models/jina_embedding/generate"
-        
-    SecRule TX:model_name "@contains e5-mistral" \
-        "id:2005,\
-        phase:2,\
-        nolog,\
-        pass,\
-        setenv:MODEL_SERVICE=triton-2.apps.bank.com:8000,\
-        setenv:MODEL_PATH=/v2/models/e5_mistral_embedding/generate"
-    
-    # Default model service if none matched
-    SecRule ENV:MODEL_SERVICE "^$" \
-        "id:3001,\
-        phase:2,\
-        nolog,\
-        pass,\
-        setenv:MODEL_SERVICE=triton-1.app.svc.bank.com:9000,\
-        setenv:MODEL_PATH=/v1/chat/completions"
-    
-    # Log the routing decision for debugging
-    SecRule TX:model_name "!^$" \
-        "id:3002,\
-        phase:2,\
-        nolog,\
-        pass,\
-        setenv:ROUTE_LOG=Model: %{TX.model_name}, Service: %{ENV:MODEL_SERVICE}, Path: %{ENV:MODEL_PATH}"
+    # Debug for troubleshooting - write model name to response header
+    # Uncomment for debugging
+    # Header always set X-Debug-Model-Name "%{MODEL_NAME}e" env=MODEL_NAME
 </IfModule>
 
-# API endpoint configuration with JWT auth for all API requests except health and token endpoints
-<LocationMatch "^/(?!health|get-token|jwt-callback).*">
-    # Apply JWT auth to all API endpoints
-    AuthType openid-connect
-    Require valid-user
+# Routing rules based on MODEL_NAME
+<IfModule rewrite_module>
+    # Chat Completion Models (OpenAI-compatible /v1/chat/completions)
+    RewriteCond %{ENV:MODEL_NAME} =llama-70b [NC,OR]
+    RewriteCond %{ENV:MODEL_NAME} =Llama-70b-Instruct [NC]
+    RewriteRule ^/(.*)$ http://triton-1.app.svc.cluster.local:9000/v1/chat/completions [P,L,NE]
+    RewriteRule ^/(.*)$ - [E=ENDPOINT_TYPE:chat]
     
-    # Configure proxy settings
-    ProxyPreserveHost On
+    RewriteCond %{ENV:MODEL_NAME} =mixtral [NC]
+    RewriteRule ^/(.*)$ http://triton-1.app.svc.cluster.local:9000/v1/chat/completions [P,L,NE]
+    RewriteRule ^/(.*)$ - [E=ENDPOINT_TYPE:chat]
     
-    # These settings allow streaming to work properly
-    SetEnv proxy-initial-not-pooled 1
-    SetEnv force-proxy-request-1.0 1
-    SetEnv proxy-nokeepalive 1
+    RewriteCond %{ENV:MODEL_NAME} =mistral [NC]
+    RewriteRule ^/(.*)$ http://triton-1.app.svc.cluster.local:9000/v1/chat/completions [P,L,NE]
+    RewriteRule ^/(.*)$ - [E=ENDPOINT_TYPE:chat]
     
-    # Set headers for backend - FIXED to use id_token instead of access_token
-    RequestHeader set X-User-ID "%{REMOTE_USER}e"
-    RequestHeader set X-JWT-Token "%{OIDC_id_token}e"
-    RequestHeader set X-Original-Model "%{ENV:MODEL_NAME}e"
+    # Embedding Models (Triton PyTorch /v2/models/X/generate)
+    RewriteCond %{ENV:MODEL_NAME} =jina [NC]
+    RewriteRule ^/(.*)$ http://triton-2.apps.svc.cluster.local:8000/v2/models/jina_embedding/generate [P,L,NE]
+    RewriteRule ^/(.*)$ - [E=ENDPOINT_TYPE:embedding]
     
-    # Enable rewrite engine
-    RewriteEngine On
+    RewriteCond %{ENV:MODEL_NAME} =e5-mistral [NC]
+    RewriteRule ^/(.*)$ http://triton-2.apps.svc.cluster.local:8000/v2/models/e5_mistral_embedding/generate [P,L,NE]
+    RewriteRule ^/(.*)$ - [E=ENDPOINT_TYPE:embedding]
     
-    # Now route directly to the specific service + path based on model
-    RewriteCond %{ENV:MODEL_SERVICE} !^$
-    RewriteCond %{ENV:MODEL_PATH} !^$
-    # The key difference: we're not passing along the original path, 
-    # but using the specific backend path for each model
-    RewriteRule ^/(.*)$ http://%{ENV:MODEL_SERVICE}%{ENV:MODEL_PATH} [P,L]
-    
-    # Fallback if no model detected (should not happen with our default)
-    RewriteRule ^/(.*)$ http://triton-1.app.svc.bank.com:9000/v1/chat/completions [P,L]
-</LocationMatch>
+    # Default routing (assume chat completion) as fallback
+    RewriteCond %{ENV:MODEL_NAME} ^$
+    RewriteRule ^/(.*)$ http://triton-1.app.svc.cluster.local:9000/v1/chat/completions [P,L,NE]
+    RewriteRule ^/(.*)$ - [E=ENDPOINT_TYPE:chat]
+</IfModule>
 
-# Set error response format to match OpenAI API format
-ErrorDocument 400 '{"error": {"message": "Bad request format", "type": "invalid_request_error", "param": null, "code": null}}'
-ErrorDocument 401 '{"error": {"message": "Authentication required", "type": "authentication_error", "param": null, "code": null}}'
-ErrorDocument 404 '{"error": {"message": "The requested resource was not found", "type": "invalid_request_error", "param": null, "code": null}}'
-ErrorDocument 500 '{"error": {"message": "The server had an error processing your request", "type": "server_error", "param": null, "code": null}}'
+# Proxy settings for streaming
+SetEnv proxy-initial-not-pooled 1
+SetEnv force-proxy-request-1.0 1
+SetEnv proxy-nokeepalive 1
