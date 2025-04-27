@@ -161,5 +161,6 @@ def application(environ, start_response):
         "message": "Forwarding to backend via Apache proxy"
     }).encode('utf-8')]
 
-SetEnvIf X-Original-Model "(.+)" MODEL_NAME=$1
-
+<IfModule headers_module>
+    RequestHeader set MODEL_NAME "%{HTTP_X_MODEL_NAME}e" env=HTTP_X_MODEL_NAME
+</IfModule>
