@@ -160,3 +160,6 @@ def application(environ, start_response):
         "model": model_name,
         "message": "Forwarding to backend via Apache proxy"
     }).encode('utf-8')]
+
+SetEnvIf X-Original-Model "(.+)" MODEL_NAME=$1
+
