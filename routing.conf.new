@@ -5,16 +5,18 @@ LoadModule headers_module modules/mod_headers.so
 LoadModule rewrite_module modules/mod_rewrite.so
 LoadModule env_module modules/mod_env.so
 
-# Set MODEL_NAME from X-Original-Model
-SetEnvIf X-Original-Model "(.+)" MODEL_NAME=$1
-PassEnv MODEL_NAME
-
-<IfModule setenvif_module>
-    SetEnvIfExpr "req('X-Original-Model') =~ /(.+)/" MODEL_NAME=$1
-    PassEnv MODEL_NAME
+<IfModule headers_module>
+    # Copy X-Original-Model to X-Model-Name
+    RequestHeader set X-Model-Name "%{HTTP_X_ORIGINAL_MODEL}e" env=HTTP_X_ORIGINAL_MODEL
+    # Diagnostic header to confirm X-Original-Model is seen
+    Header always set X-Debug-Original-Model "%{HTTP_X_ORIGINAL_MODEL}e" env=HTTP_X_ORIGINAL_MODEL
 </IfModule>
 
-# Debug header to confirm MODEL_NAME
+# Set MODEL_NAME from X-Model-Name
+SetEnvIf X-Model-Name "(.+)" MODEL_NAME=$1
+PassEnv MODEL_NAME
+
+# Debug header for MODEL_NAME
 <IfModule headers_module>
     Header always set X-Debug-Model-Name "%{MODEL_NAME}e" env=MODEL_NAME
 </IfModule>
