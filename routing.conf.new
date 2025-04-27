@@ -1,38 +1,54 @@
-## TESTING the proxy ###.
-LoadModule security2_module modules/mod_security2.so
+# Load required modules
 LoadModule proxy_module modules/mod_proxy.so
 LoadModule proxy_http_module modules/mod_proxy_http.so
-LoadModule rewrite_module modules/mod_rewrite.so
 LoadModule headers_module modules/mod_headers.so
-LoadModule unique_id_module modules/mod_unique_id.so
-LogLevel rewrite:trace3 proxy:debug
-<VirtualHost *:80>
-    ServerName 'webmod-prxy-cp-1920938.apps.conso.com'
-    ProxyPreserveHost On
-    <IfModule mod_security2.c>
-        SecRuleEngine On
-        SecAuditEngine RelevantOnly
-        SecRequestBodyAccess On
-        SecResponseBodyAccess Off
-        SecRequestBodyLimit 134217728
-        SecRequestBodyLimitAction ProcessPartial
-        SecRule REQUEST_HEADERS:Content-Type "application/json" "id:1000,pass,nolog,ctl:requestBodyProcessor=JSON"
-        SecRule REQUEST_BODY:model "@streq llama-2-70b-instruct" "id:2000,phase:2,pass,nolog,setvar:tx.model_route=llama,ctl:ruleEngine=DetectionOnly"
-        SecRule REQUEST_HEADERS:Authorization "^(?x %Bearer (.+)$)" "id:1001,phase:1,pass,nolog,setvar:tx.token=%{TX.1}"
-        SecRule TX:token "!@strmatch %{ENV.LLAMA_API_KEY}" "id:1002,phase:1,deny,status:403,msg:'Invalid API Token'"
-        PassEnv LLAMA_API_KEY
-        PassEnv JINA_API_KEY
-        PassEnv ESMIST_API_KEY
-        ErrorLog /var/log/httpd/webmod_pxy_error.log
-        CustomLog /var/log/httpd/webmod_pxy_access.log combined
-        SecDebugLogLevel 3
-        SecDebugLog /var/log/httpd/webmod_pxy_sec_debug.log
-        SecAuditLog /var/log/httpd/webmod_pxy_sec_audit.log
-    </IfModule>
+LoadModule rewrite_module modules/mod_rewrite.so
+LoadModule env_module modules/mod_env.so
+
+# Set MODEL_NAME from X-Original-Model
+SetEnvIf X-Original-Model "(.+)" MODEL_NAME=$1
+PassEnv MODEL_NAME
+
+# Routing rules
+<IfModule rewrite_module>
     RewriteEngine On
-    RewriteCond %{HTTP:X-Model-Route} ^llama$
-    RewriteRule ^/.* /llama [PT]
-    ProxyPass /llama http://labs-triton-1.cp-1920938.svc.cluster.local:9000/v1/chat/completions
-    RequestHeader set X-Forwarded-For %{REMOTE_ADDR}s
-    RequestHeader set X-Model-Route "%{TX_model_route}e" env=TX.model_route
-</VirtualHost>
+
+    # Chat Completion Models
+    RewriteCond %{ENV:MODEL_NAME} ^llama-70b$ [NC]
+    RewriteRule ^/(.*)$ http://triton-1.app.svc.cluster.local:9000/v1/chat/completions [P,L,NE]
+    RewriteRule ^/(.*)$ - [E=ENDPOINT_TYPE:chat]
+
+    RewriteCond %{ENV:MODEL_NAME} ^mixtral$ [NC]
+    RewriteRule ^/(.*)$ http://triton-3.app.svc.cluster.local:9000/v1/chat/completions [P,L,NE]
+    RewriteRule ^/(.*)$ - [E=ENDPOINT_TYPE:chat]
+
+    RewriteCond %{ENV:MODEL_NAME} ^mistral$ [NC]
+    RewriteRule ^/(.*)$ http://triton-5.app.svc.cluster.local:9000/v1/chat/completions [P,L,NE]
+    RewriteRule ^/(.*)$ - [E=ENDPOINT_TYPE:chat]
+
+    # Embedding Models
+    RewriteCond %{ENV:MODEL_NAME} ^jina$ [NC]
+    RewriteRule ^/(.*)$ http://triton-2.app.svc.cluster.local:8000/v2/models/jina_embedding/generate [P,L,NE]
+    RewriteRule ^/(.*)$ - [E=ENDPOINT_TYPE:embedding]
+
+    RewriteCond %{ENV:MODEL_NAME} ^e5-mistral$ [NC]
+    RewriteRule ^/(.*)$ http://triton-4.app.svc.cluster.local:8000/v2/models/e5_mistral_embedding/generate [P,L,NE]
+    RewriteRule ^/(.*)$ - [E=ENDPOINT_TYPE:embedding]
+
+    # Default routing
+    RewriteCond %{ENV:MODEL_NAME} ^$
+    RewriteRule ^/(.*)$ http://triton-1.app.svc.cluster.local:9000/v1/chat/completions [P,L,NE]
+    RewriteRule ^/(.*)$ - [E=ENDPOINT_TYPE:chat]
+</IfModule>
+
+# Proxy settings
+ProxyPassReverse / http://triton-1.app.svc.cluster.local:9000/
+ProxyPassReverse / http://triton-2.app.svc.cluster.local:8000/
+ProxyPassReverse / http://triton-3.app.svc.cluster.local:9000/
+ProxyPassReverse / http://triton-4.app.svc.cluster.local:8000/
+ProxyPassReverse / http://triton-5.app.svc.cluster.local:9000/
+ProxyPassReverse / http://triton-6.app.svc.cluster.local:8000/
+ProxyPreserveHost On
+SetEnv proxy-initial-not-pooled 1
+SetEnv force-proxy-request-1.0 1
+SetEnv proxy-nokeepalive 1
