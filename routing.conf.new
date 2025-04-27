@@ -9,6 +9,10 @@ LoadModule env_module modules/mod_env.so
 SetEnvIf X-Original-Model "(.+)" MODEL_NAME=$1
 PassEnv MODEL_NAME
 
+<IfModule headers_module>
+    Header always set X-Debug-Model-Name "%{MODEL_NAME}e" env=MODEL_NAME
+</IfModule>
+
 # Routing rules
 <IfModule rewrite_module>
     RewriteEngine On
