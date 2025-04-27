@@ -1,4 +1,3 @@
-/usr/local/apache2/htdocs/token.html
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -28,6 +27,7 @@
             padding: 10px 20px;
             cursor: pointer;
             border-radius: 4px;
+            margin: 5px;
         }
         button:hover {
             background: #0056b3;
@@ -38,44 +38,290 @@
             border: 1px solid #ccc;
             overflow-x: auto;
         }
+        .tab {
+            overflow: hidden;
+            border: 1px solid #ccc;
+            background-color: #f1f1f1;
+        }
+        .tab button {
+            background-color: inherit;
+            float: left;
+            border: none;
+            outline: none;
+            cursor: pointer;
+            padding: 14px 16px;
+            transition: 0.3s;
+            color: black;
+            border-radius: 0;
+            margin: 0;
+        }
+        .tab button:hover {
+            background-color: #ddd;
+        }
+        .tab button.active {
+            background-color: #ccc;
+        }
+        .tabcontent {
+            display: none;
+            padding: 6px 12px;
+            border: 1px solid #ccc;
+            border-top: none;
+        }
+        .show {
+            display: block;
+        }
+        .expiry {
+            color: #dc3545;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+        .valid {
+            color: #28a745;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+        .token-info {
+            margin-top: 20px;
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 4px;
+            border: 1px solid #dee2e6;
+            display: none;
+        }
     </style>
 </head>
 <body>
     <h1>Your JWT Token</h1>
-    <p>Use this token to authenticate with the Model API:</p>
-    <div class="token" id="token">%OIDC_id_token%</div>
-    <button onclick="copyToken()">Copy to Clipboard</button>
-
+    
+    <!-- Token section - only shown when user is authenticated -->
+    <div id="token-section">
+        <p>Use this token to authenticate with the Model API:</p>
+        <div class="token" id="token">%{OIDC_id_token}e</div>
+        <div id="token-status"></div>
+        <button onclick="copyToken()">Copy to Clipboard</button>
+        <button onclick="decodeToken()">View Token Details</button>
+        
+        <div id="token-info" class="token-info">
+            <h3>Token Information</h3>
+            <pre id="token-details"></pre>
+        </div>
+    </div>
+    
     <h2>Example Usage</h2>
-    <pre>
+    <div class="tab">
+        <button class="tablinks active" onclick="openTab(event, 'Python')">Python</button>
+        <button class="tablinks" onclick="openTab(event, 'Curl')">Curl</button>
+        <button class="tablinks" onclick="openTab(event, 'JavaScript')">JavaScript</button>
+    </div>
+    
+    <div id="Python" class="tabcontent show">
+        <h3>Python Example (OpenAI Client)</h3>
+        <pre>
 from openai import OpenAI
 
 client = OpenAI(
     api_key="dummy-value-not-used",
     base_url="https://api.example.com/",
-    default_headers={"Authorization": "Bearer YOUR_TOKEN_HERE"}
+    default_headers={"X-JWT-Token": "YOUR_TOKEN_HERE"}
 )
-
 # For completions
 completion = client.chat.completions.create(
     model="mixtral",
     messages=[{"role": "user", "content": "Hello"}]
 )
-
 # For embeddings
 embedding = client.embeddings.create(
     model="jina",
     input="Hello world"
 )
-    </pre>
+        </pre>
+        
+        <h3>LangChain Example</h3>
+        <pre>
+from langchain_openai import ChatOpenAI
+
+# Initialize the model
+chat = ChatOpenAI(
+    model="mixtral",
+    openai_api_key="dummy-value-not-used",
+    openai_api_base="https://api.example.com/",
+    default_headers={"X-JWT-Token": "YOUR_TOKEN_HERE"}
+)
+
+# Generate a response
+response = chat.invoke("What is the capital of France?")
+print(response.content)
+        </pre>
+    </div>
+    
+    <div id="Curl" class="tabcontent">
+        <h3>Curl Example</h3>
+        <pre>
+# Chat completion
+curl -X POST https://api.example.com/ \
+  -H "Content-Type: application/json" \
+  -H "X-JWT-Token: YOUR_TOKEN_HERE" \
+  -d '{
+    "model": "mixtral",
+    "messages": [{"role": "user", "content": "Hello"}]
+  }'
+
+# Embedding
+curl -X POST https://api.example.com/ \
+  -H "Content-Type: application/json" \
+  -H "X-JWT-Token: YOUR_TOKEN_HERE" \
+  -d '{
+    "model": "jina",
+    "input": "Hello world"
+  }'
+        </pre>
+    </div>
+    
+    <div id="JavaScript" class="tabcontent">
+        <h3>JavaScript Example</h3>
+        <pre>
+// Chat completion
+async function getChatCompletion() {
+  const response = await fetch('https://api.example.com/', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-JWT-Token': 'YOUR_TOKEN_HERE'
+    },
+    body: JSON.stringify({
+      model: 'mixtral',
+      messages: [{role: 'user', content: 'Hello'}]
+    })
+  });
+  
+  const data = await response.json();
+  console.log(data);
+}
+        </pre>
+    </div>
 
     <script>
+        // Function to open tabs
+        function openTab(evt, tabName) {
+            var i, tabcontent, tablinks;
+            tabcontent = document.getElementsByClassName("tabcontent");
+            for (i = 0; i < tabcontent.length; i++) {
+                tabcontent[i].style.display = "none";
+            }
+            tablinks = document.getElementsByClassName("tablinks");
+            for (i = 0; i < tablinks.length; i++) {
+                tablinks[i].className = tablinks[i].className.replace(" active", "");
+            }
+            document.getElementById(tabName).style.display = "block";
+            evt.currentTarget.className += " active";
+        }
+
+        // Function to copy token to clipboard
         function copyToken() {
             const token = document.getElementById("token").innerText;
             navigator.clipboard.writeText(token).then(() => {
                 alert("Token copied to clipboard!");
             });
         }
+
+        // Function to decode and display token information
+        function decodeToken() {
+            const token = document.getElementById("token").innerText;
+            try {
+                const parts = token.split('.');
+                if (parts.length !== 3) {
+                    throw new Error("Not a valid JWT token format");
+                }
+                
+                // Parse the payload
+                const payload = JSON.parse(atob(parts[1]));
+                document.getElementById("token-details").textContent = JSON.stringify(payload, null, 2);
+                
+                // Show the token info section
+                document.getElementById("token-info").style.display = "block";
+            } catch (e) {
+                alert("Error decoding token: " + e.message);
+                console.error(e);
+            }
+        }
+
+        // Check token on page load
+        document.addEventListener("DOMContentLoaded", function() {
+            const token = document.getElementById("token").innerText;
+            // Check if token is the template variable (not replaced) or empty
+            if (token === "%{OIDC_id_token}e" || token.trim() === "") {
+                // Redirect to auth if token not available
+                window.location.href = "/get-token";
+            } else {
+                // Check token expiration
+                try {
+                    const parts = token.split('.');
+                    if (parts.length === 3) {
+                        const payload = JSON.parse(atob(parts[1]));
+                        const now = Math.floor(Date.now() / 1000);
+                        const statusDiv = document.getElementById("token-status");
+                        
+                        if (payload.exp && payload.exp < now) {
+                            statusDiv.innerHTML = `<div class="expiry">⚠️ Token expired on ${new Date(payload.exp * 1000).toLocaleString()}</div>`;
+                        } else if (payload.exp) {
+                            statusDiv.innerHTML = `<div class="valid">✓ Valid until ${new Date(payload.exp * 1000).toLocaleString()}</div>`;
+                        }
+                    }
+                } catch (e) {
+                    console.error("Error checking token expiration:", e);
+                }
+            }
+        });
     </script>
 </body>
 </html>
+
+# Add this line at the top level for header-to-environment variable mapping
+SetEnvIf X-Original-Model "(.+)" MODEL_NAME=$1
+
+# Token display endpoint
+<Location /get-token>
+    AuthType openid-connect
+    Require valid-user
+    Header set Content-Type "text/html; charset=UTF-8"
+    RewriteEngine On
+    RewriteRule ^/get-token$ /var/www/html/token.html [L]
+    SetEnvIf Request_URI "^/get-token" SHOW_TOKEN=true
+</Location>
+
+# Health check endpoint
+<Location /health>
+    SetHandler server-status
+</Location>
+
+# Main API endpoint - Improved browser handling
+<LocationMatch "^/$">
+    AuthType openid-connect
+    Require valid-user
+    ProxyPreserveHost On
+    RequestHeader set X-User-ID "%{REMOTE_USER}e"
+    RequestHeader set X-JWT-Token "%{OIDC_id_token}e"
+    RequestHeader set X-Original-Model "%{ENV:MODEL_NAME}e"
+    
+    # Detect browser requests and redirect to token page
+    RewriteEngine On
+    RewriteCond %{HTTP_USER_AGENT} "Mozilla|Chrome|Safari|Firefox|Edge" [NC]
+    RewriteCond %{HTTP_ACCEPT} text/html [NC]
+    RewriteCond %{REQUEST_METHOD} GET [NC]
+    RewriteRule ^/$ /get-token [R,L]
+</LocationMatch>
+
+# Test endpoint (keep only if needed)
+<Location /test>
+    AuthType None
+    Require all granted
+    ProxyPreserveHost On
+    RequestHeader set X-User-ID "test-user"
+    RequestHeader set X-JWT-Token "disabled-for-testing"
+    RequestHeader set X-Original-Model "%{ENV:MODEL_NAME}e"
+</Location>
+
+ErrorDocument 400 '{"error": {"message": "Bad request format", "type": "invalid_request_error", "param": null, "code": null}}'
+ErrorDocument 401 '{"error": {"message": "Authentication required", "type": "authentication_error", "param": null, "code": null}}'
+ErrorDocument 404 '{"error": {"message": "The requested resource was not found", "type": "invalid_request_error", "param": null, "code": null}}'
+ErrorDocument 500 '{"error": {"message": "The server had an error processing your request", "type": "server_error", "param": null, "code": null}}'
