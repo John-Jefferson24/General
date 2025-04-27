@@ -5,10 +5,9 @@ LoadModule headers_module modules/mod_headers.so
 LoadModule rewrite_module modules/mod_rewrite.so
 LoadModule env_module modules/mod_env.so
 
+# Set intermediate header and MODEL_NAME
 <IfModule headers_module>
-    # Copy X-Original-Model to X-Model-Name
     RequestHeader set X-Model-Name "%{HTTP_X_ORIGINAL_MODEL}e" env=HTTP_X_ORIGINAL_MODEL
-    # Diagnostic header to confirm X-Original-Model is seen
     Header always set X-Debug-Original-Model "%{HTTP_X_ORIGINAL_MODEL}e" env=HTTP_X_ORIGINAL_MODEL
 </IfModule>
 
@@ -26,31 +25,24 @@ PassEnv MODEL_NAME
     RewriteEngine On
 
     # Chat Completion Models
-    RewriteCond %{ENV:MODEL_NAME} ^llama-70b$ [NC]
-    RewriteRule ^/(.*)$ http://triton-1.app.svc.cluster.local:9000/v1/chat/completions [P,L,NE]
-    RewriteRule ^/(.*)$ - [E=ENDPOINT_TYPE:chat]
+    RewriteCond %{ENV:MODEL_NAME} llama-70b [NC]
+    RewriteRule ^/(.*)$ http://triton-1.app.svc.cluster.local:9000/v1/chat/completions [P,L]
 
-    RewriteCond %{ENV:MODEL_NAME} ^mixtral$ [NC]
-    RewriteRule ^/(.*)$ http://triton-3.app.svc.cluster.local:9000/v1/chat/completions [P,L,NE]
-    RewriteRule ^/(.*)$ - [E=ENDPOINT_TYPE:chat]
+    RewriteCond %{ENV:MODEL_NAME} mixtral [NC]
+    RewriteRule ^/(.*)$ http://triton-3.app.svc.cluster.local:9000/v1/chat/completions [P,L]
 
-    RewriteCond %{ENV:MODEL_NAME} ^mistral$ [NC]
-    RewriteRule ^/(.*)$ http://triton-5.app.svc.cluster.local:9000/v1/chat/completions [P,L,NE]
-    RewriteRule ^/(.*)$ - [E=ENDPOINT_TYPE:chat]
+    RewriteCond %{ENV:MODEL_NAME} mistral [NC]
+    RewriteRule ^/(.*)$ http://triton-5.app.svc.cluster.local:9000/v1/chat/completions [P,L]
 
     # Embedding Models
-    RewriteCond %{ENV:MODEL_NAME} ^jina$ [NC]
-    RewriteRule ^/(.*)$ http://triton-2.app.svc.cluster.local:8000/v2/models/jina_embedding/generate [P,L,NE]
-    RewriteRule ^/(.*)$ - [E=ENDPOINT_TYPE:embedding]
+    RewriteCond %{ENV:MODEL_NAME} jina [NC]
+    RewriteRule ^/(.*)$ http://triton-2.app.svc.cluster.local:8000/v2/models/jina_embedding/generate [P,L]
 
-    RewriteCond %{ENV:MODEL_NAME} ^e5-mistral$ [NC]
-    RewriteRule ^/(.*)$ http://triton-4.app.svc.cluster.local:8000/v2/models/e5_mistral_embedding/generate [P,L,NE]
-    RewriteRule ^/(.*)$ - [E=ENDPOINT_TYPE:embedding]
+    RewriteCond %{ENV:MODEL_NAME} e5-mistral [NC]
+    RewriteRule ^/(.*)$ http://triton-4.app.svc.cluster.local:8000/v2/models/e5_mistral_embedding/generate [P,L]
 
     # Default routing
-    RewriteCond %{ENV:MODEL_NAME} ^$
-    RewriteRule ^/(.*)$ http://triton-1.app.svc.cluster.local:9000/v1/chat/completions [P,L,NE]
-    RewriteRule ^/(.*)$ - [E=ENDPOINT_TYPE:chat]
+    RewriteRule ^/(.*)$ http://triton-1.app.svc.cluster.local:9000/v1/chat/completions [P,L]
 </IfModule>
 
 # Proxy settings
@@ -61,6 +53,3 @@ ProxyPassReverse / http://triton-4.app.svc.cluster.local:8000/
 ProxyPassReverse / http://triton-5.app.svc.cluster.local:9000/
 ProxyPassReverse / http://triton-6.app.svc.cluster.local:8000/
 ProxyPreserveHost On
-SetEnv proxy-initial-not-pooled 1
-SetEnv force-proxy-request-1.0 1
-SetEnv proxy-nokeepalive 1
