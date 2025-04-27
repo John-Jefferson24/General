@@ -10,6 +10,7 @@ SetEnvIf X-Original-Model "(.+)" MODEL_NAME=$1
 PassEnv MODEL_NAME
 
 <IfModule headers_module>
+    RequestHeader set MODEL_NAME "%{HTTP_X_ORIGINAL_MODEL}e" env=HTTP_X_ORIGINAL_MODEL
     Header always set X-Debug-Model-Name "%{MODEL_NAME}e" env=MODEL_NAME
 </IfModule>
 
