@@ -24,6 +24,9 @@ PassEnv MODEL_NAME
 <IfModule rewrite_module>
     RewriteEngine On
 
+    # Test proxy endpoint
+    RewriteRule ^/test-proxy/(.*)$ http://triton-1.app.svc.cluster.local:9000/v1/chat/completions [P,L]
+
     # Chat Completion Models
     RewriteCond %{ENV:MODEL_NAME} llama-70b [NC]
     RewriteRule ^/(.*)$ http://triton-1.app.svc.cluster.local:9000/v1/chat/completions [P,L]
