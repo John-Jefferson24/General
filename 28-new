@@ -27,6 +27,9 @@ WSGIScriptAlias / /var/www/html/api.py
 # =========================================================
 # 3. ENVIRONMENT VARIABLES AND HEADERS
 # =========================================================
+# Capture the X-Original-Model from WSGI response into a request header
+RequestHeader set X-Original-Model "%{X-Original-Model}e" env=X-Original-Model
+
 # Extract MODEL_NAME from headers set by the middleware
 SetEnvIf X-Original-Model "(.+)" MODEL_NAME=$1
 PassEnv MODEL_NAME
