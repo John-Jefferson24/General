@@ -1,0 +1,231 @@
+httpd.conf >
+
+# WSGI configuration for Python script as middleware
+WSGIDaemonProcess api user=apache group=apache threads=5 python-home=/usr/bin/python3
+WSGIScriptAlias / /var/www/html/api.py
+
+# Critical: Pass Authorization headers to the WSGI application
+WSGIPassAuthorization On
+
+<Directory /var/www/html>
+    WSGIProcessGroup api
+    WSGIApplicationGroup %{GLOBAL}
+    Require all granted
+</Directory>
+
+# Set up environment variables from middleware
+SetEnvIf X-Original-Model "(.+)" MODEL_NAME=$1
+PassEnv MODEL_NAME
+
+# Add debug headers if needed
+<IfModule headers_module>
+    Header always set X-Debug-Model-Name "%{MODEL_NAME}e" env=MODEL_NAME
+    Header always set X-Debug-Original-Model "%{HTTP_X_ORIGINAL_MODEL}e" env=HTTP_X_ORIGINAL_MODEL
+</IfModule>
+
+# Important for streaming responses
+RequestHeader unset Accept-Encoding
+
+routing.conf
+
+# Make sure these directives are in your routing.conf file:
+
+# Routing rules based on model name from middleware
+<IfModule rewrite_module>
+    RewriteEngine On
+    
+    # Chat Completion Models
+    RewriteCond %{ENV:MODEL_NAME} llama-70b [NC]
+    RewriteRule ^/(.*)$ http://triton-1.app.svc.cluster.local:9000/v1/chat/completions [P,L]
+    
+    RewriteCond %{ENV:MODEL_NAME} mixtral [NC]
+    RewriteRule ^/(.*)$ http://triton-3.app.svc.cluster.local:9000/v1/chat/completions [P,L]
+    
+    RewriteCond %{ENV:MODEL_NAME} mistral [NC]
+    RewriteRule ^/(.*)$ http://triton-5.app.svc.cluster.local:9000/v1/chat/completions [P,L]
+    
+    # Embedding Models
+    RewriteCond %{ENV:MODEL_NAME} jina [NC]
+    RewriteRule ^/(.*)$ http://triton-2.app.svc.cluster.local:8000/v2/models/jina_embedding/generate [P,L]
+    
+    RewriteCond %{ENV:MODEL_NAME} e5-mistral [NC]
+    RewriteRule ^/(.*)$ http://triton-4.app.svc.cluster.local:8000/v2/models/e5_mistral_embedding/generate [P,L]
+    
+    # Default routing 
+    RewriteRule ^/(.*)$ http://triton-1.app.svc.cluster.local:9000/v1/chat/completions [P,L]
+</IfModule>
+
+# Proxy settings
+ProxyPassReverse / http://triton-1.app.svc.cluster.local:9000/
+ProxyPassReverse / http://triton-2.app.svc.cluster.local:8000/
+ProxyPassReverse / http://triton-3.app.svc.cluster.local:9000/
+ProxyPassReverse / http://triton-4.app.svc.cluster.local:8000/
+ProxyPassReverse / http://triton-5.app.svc.cluster.local:9000/
+ProxyPassReverse / http://triton-6.app.svc.cluster.local:8000/
+
+# Important setting for proxying
+ProxyPreserveHost On
+
+api.py
+
+import os
+import json
+import logging
+import requests
+from jwt import decode as jwt_decode, get_unverified_header, InvalidTokenError
+from io import BytesIO
+
+# Configure logging with rotation
+from logging.handlers import RotatingFileHandler
+handler = RotatingFileHandler(
+    os.getenv('LOG_FILE', '/var/log/api.log'),
+    maxBytes=10*1024*1024,
+    backupCount=5
+)
+logging.basicConfig(handlers=[handler], level=logging.INFO)
+
+# Configuration
+JWKS_URL = os.getenv('JWKS_URL', 'https://pingfederate.yourbank.com/.well-known/jwks.json')
+AUDIENCE = os.getenv('AUDIENCE', 'your_client_id')
+ISSUER = os.getenv('ISSUER', 'https://pingfederate.yourbank.com')
+REDIRECT_URL = os.getenv('JWT_REDIRECT_URL', '/jwt-callback')
+
+def validate_jwt(token):
+    """Validate JWT using PingFederate's JWKS endpoint."""
+    try:
+        jwks = requests.get(JWKS_URL, timeout=5, verify=True).json()
+        header = get_unverified_header(token)
+        kid = header['kid']
+        key = next(k for k in jwks['keys'] if k['kid'] == kid)
+        decoded = jwt_decode(
+            token,
+            key,
+            algorithms=['RS256'],
+            audience=AUDIENCE,
+            issuer=ISSUER
+        )
+        return decoded
+    except (requests.RequestException, InvalidTokenError, KeyError, StopIteration) as e:
+        logging.error(f"JWT validation failed: {str(e)}")
+        return None
+
+def error_response(message, status, headers, start_response):
+    """Return a standardized error response."""
+    logging.error(message)
+    start_response(status, headers)
+    return [json.dumps({
+        "error": {
+            "message": message,
+            "type": "invalid_request_error",
+            "param": None,
+            "code": None
+        }
+    }).encode('utf-8')]
+
+# ===== BEGIN TEST FUNCTIONALITY =====
+# You can remove this entire function if you want to delete test functionality
+def handle_test_request(environ, start_response):
+    """Handle test requests without JWT validation."""
+    logging.info("Handling test request - bypassing JWT validation")
+    
+    # Parse JSON body
+    try:
+        content_length = int(environ.get('CONTENT_LENGTH', 0))
+        request_body = environ['wsgi.input'].read(content_length)
+        environ['wsgi.input'] = BytesIO(request_body)  # Make body available for reuse
+        
+        body = request_body.decode('utf-8')
+        data = json.loads(body) if body else {}
+    except (ValueError, json.JSONDecodeError) as e:
+        return error_response(f"Invalid JSON: {str(e)}", '400 Bad Request', [('Content-Type', 'application/json')], start_response)
+
+    # Extract model name - works for both completions and embeddings
+    model_name = data.get('model')
+    if not model_name:
+        return error_response("Missing model field", '400 Bad Request', [('Content-Type', 'application/json')], start_response)
+
+    # Set MODEL_NAME for Apache routing
+    os.environ['MODEL_NAME'] = model_name
+    
+    # Add header for Apache routing
+    environ['HTTP_X_ORIGINAL_MODEL'] = model_name
+    
+    # Log test request
+    logging.info(f"TEST MODE: Processed model: {model_name}")
+    
+    # Return None to let Apache continue processing
+    return None
+# ===== END TEST FUNCTIONALITY =====
+
+def application(environ, start_response):
+    """WSGI application for JSON processing and backend forwarding."""
+    path_info = environ.get('PATH_INFO', '')
+    
+    # ===== BEGIN TEST ENDPOINT CHECK =====
+    # Remove these lines if you want to delete test functionality
+    if path_info == '/test' or environ.get('HTTP_X_TEST_MODE') == 'true':
+        test_response = handle_test_request(environ, start_response)
+        if test_response is not None:
+            return test_response
+    # ===== END TEST ENDPOINT CHECK =====
+    
+    headers = [('Content-Type', 'application/json')]
+    
+    # Check JWT token from various possible sources
+    jwt_token = None
+    
+    # Method 1: X-JWT-Token header (used by Python clients like OpenAI/LangChain)
+    for key, value in environ.items():
+        if key.startswith('HTTP_') and key[5:].lower() == 'x_jwt_token':
+            jwt_token = value
+            break
+    
+    # Method 2: Authorization header with Bearer token (common API pattern)
+    if not jwt_token and 'HTTP_AUTHORIZATION' in environ:
+        auth = environ['HTTP_AUTHORIZATION']
+        if auth.startswith('Bearer '):
+            jwt_token = auth[7:]  # Remove 'Bearer ' prefix
+    
+    # If no token found or invalid token - return 401 (no redirect)
+    if not jwt_token or not validate_jwt(jwt_token):
+        if not jwt_token:
+            logging.error("Missing JWT token")
+        else:
+            logging.error("Invalid JWT token")
+            
+        # Return 401 with JSON error for API clients
+        start_response('401 Unauthorized', headers)
+        return [json.dumps({
+            "error": {
+                "message": "Authentication required. Please provide a valid JWT token.",
+                "type": "authentication_error"
+            }
+        }).encode('utf-8')]
+    
+    # Parse JSON body - minimal validation
+    try:
+        content_length = int(environ.get('CONTENT_LENGTH', 0))
+        request_body = environ['wsgi.input'].read(content_length)
+        environ['wsgi.input'] = BytesIO(request_body)  # This is critical - make body available for reuse
+        
+        body = request_body.decode('utf-8')
+        data = json.loads(body) if body else {}
+    except (ValueError, json.JSONDecodeError) as e:
+        return error_response(f"Invalid JSON: {str(e)}", '400 Bad Request', headers, start_response)
+
+    # Extract model name - works for both completions and embeddings
+    model_name = data.get('model')
+    if not model_name:
+        return error_response("Missing model field", '400 Bad Request', headers, start_response)
+
+    # Set MODEL_NAME for Apache routing
+    os.environ['MODEL_NAME'] = model_name
+    
+    # Add header for Apache to use in routing
+    environ['HTTP_X_ORIGINAL_MODEL'] = model_name
+    
+    logging.info(f"Processed model: {model_name}")
+
+    # Return None to let Apache continue processing
+    # This is the key change - instead of returning a response, we let Apache handle it
+    return None
