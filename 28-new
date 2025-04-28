@@ -105,6 +105,12 @@ OIDCPassRefreshToken On
     ProxyPreserveHost On
 </LocationMatch>
 
+<Location "/health">
+    SetHandler server-status
+    Require local
+    # Or Require all granted if you want remote access (for load balancer checks, etc.)
+</Location>
+
 # Test endpoint - bypass JWT validation
 <Location "/test">
     # Set test mode header
