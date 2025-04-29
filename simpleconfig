@@ -1,0 +1,80 @@
+Listen 80
+ServerName openai-gateway.local
+
+# Load required modules
+LoadModule proxy_module modules/mod_proxy.so
+LoadModule proxy_http_module modules/mod_proxy_http.so
+LoadModule rewrite_module modules/mod_rewrite.so
+LoadModule security2_module modules/mod_security2.so
+LoadModule headers_module modules/mod_headers.so
+
+# === mod_security: Extract model name from JSON body ===
+<IfModule mod_security2.c>
+    SecRuleEngine On
+    SecRequestBodyAccess On
+    SecRequestBodyLimit 52428800
+    SecRequestBodyInMemoryLimit 131072
+    SecAuditEngine Off
+    SecDebugLog /var/log/httpd/modsec_debug.log
+    SecDebugLogLevel 0
+
+    # Only parse JSON if Content-Type matches
+    SecRule REQUEST_HEADERS:Content-Type "application/json" "phase:1,t:none,nolog,pass"
+
+    # Extract the "model" field from the JSON request body
+    SecRule REQUEST_BODY "@rx \"model\"\s*:\s*\"([^\"]+)\"" \
+        "phase:2,t:none,pass,setvar:tx.model_name=\1,setenv:MODEL_NAME=\1,nolog"
+</IfModule>
+
+# === mod_rewrite: Route based on extracted model name ===
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Direct access to /health or /metrics
+    RewriteRule ^/health$ - [L]
+    RewriteRule ^/metrics$ - [L]
+
+    # Model-based routing (base path /)
+    RewriteCond %{ENV:MODEL_NAME} ^gpt-model-1$ [NC]
+    RewriteRule ^/$ http://triton1.internal/ [P,L]
+
+    RewriteCond %{ENV:MODEL_NAME} ^gpt-model-2$ [NC]
+    RewriteRule ^/$ http://triton2.internal/ [P,L]
+
+    RewriteCond %{ENV:MODEL_NAME} ^gpt-model-3$ [NC]
+    RewriteRule ^/$ http://triton3.internal/ [P,L]
+
+    RewriteCond %{ENV:MODEL_NAME} ^gpt-model-4$ [NC]
+    RewriteRule ^/$ http://triton4.internal/ [P,L]
+
+    RewriteCond %{ENV:MODEL_NAME} ^gpt-model-5$ [NC]
+    RewriteRule ^/$ http://triton5.internal/ [P,L]
+
+    # Fallback if no model matched
+    RewriteRule ^/$ http://triton1.internal/ [P,L]
+</IfModule>
+
+# === Proxy settings ===
+ProxyPreserveHost On
+ProxyRequests Off
+
+<Proxy *>
+    Require all granted
+</Proxy>
+
+# CORS & streaming compatibility (OpenAI, LangChain)
+Header always set Access-Control-Allow-Origin "*"
+Header always set Access-Control-Allow-Headers "Content-Type, Authorization"
+Header always set Access-Control-Allow-Methods "POST, GET, OPTIONS"
+Header always set Cache-Control "no-store"
+
+# === Local Apache responses for health/metrics ===
+<Location "/health">
+    SetHandler server-status
+    Require all granted
+</Location>
+
+<Location "/metrics">
+    SetHandler server-info
+    Require all granted
+</Location>
