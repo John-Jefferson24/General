@@ -1,22 +1,11 @@
 ## MODEL ROUTING USING WSGI ##
 
-# Load necessary modules
-LoadModule proxy_module modules/mod_proxy.so
-LoadModule proxy_http_module modules/mod_proxy_http.so
-LoadModule wsgi_module modules/mod_wsgi.so
-LoadModule headers_module modules/mod_headers.so
-
-# Logging
-LogLevel warn
-ErrorLog /var/log/httpd/proxy_error.log
-CustomLog /var/log/httpd/proxy_access.log combined
-
 # Global settings
 ProxyRequests Off
 ProxyPreserveHost On
 
 # Define WSGI script for model extraction
-WSGIScriptAlias "/model_router" "/var/www/wsgi/model_router.py"
+WSGIScriptAlias "/" "/var/www/wsgi/model_router.py"
 
 # WSGI directory permissions
 <Directory "/var/www/wsgi">
