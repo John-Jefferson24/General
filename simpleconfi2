@@ -1,55 +1,31 @@
-## MINIMAL MODEL EXTRACTION CONFIGURATION ##
+## DIAGNOSTIC REQUEST LOGGING CONFIGURATION ##
 
 # Load only necessary modules
 LoadModule proxy_module modules/mod_proxy.so
 LoadModule proxy_http_module modules/mod_proxy_http.so
-LoadModule security2_module modules/mod_security2.so
 LoadModule headers_module modules/mod_headers.so
 
-# Logging with maximum detail for ModSecurity
-LogLevel warn
+# Maximum logging
+LogLevel debug
 ErrorLog /var/log/httpd/proxy_error.log
 CustomLog /var/log/httpd/proxy_access.log combined
 
-# Global proxy settings
-ProxyRequests Off
-ProxyPreserveHost On
-
-# ModSecurity configuration focused solely on model extraction
-<IfModule mod_security2.c>
-    # Enable the engine and access to request bodies
-    SecRuleEngine On
-    SecRequestBodyAccess On
+# Log details about the incoming request
+<Location "/">
+    # Set response headers with request details
+    Header always set X-Request-Method "%{REQUEST_METHOD}s"
+    Header always set X-Request-URI "%{REQUEST_URI}s"
+    Header always set X-Content-Type "%{Content-Type}i"
+    Header always set X-Host "%{Host}i"
+    Header always set X-User-Agent "%{User-Agent}i"
     
-    # Maximum logging for ModSecurity
-    SecDebugLogLevel 9
-    SecAuditLogParts ABCFHZ
-    SecAuditEngine RelevantOnly
-    SecAuditLog /var/log/httpd/modsec_audit.log
-    SecDebugLog /var/log/httpd/modsec_debug.log
-    
-    # Enable JSON body processor with logging
-    SecRule REQUEST_HEADERS:Content-Type "application/json" \
-           "id:1000,phase:1,pass,log,auditlog,msg:'Enabling JSON processor',ctl:requestBodyProcessor=JSON"
-    
-    # Try a simplified model extraction with full logging
-    SecRule REQUEST_BODY "@contains model" \
-           "id:2000,phase:2,pass,log,auditlog,msg:'Found model in body',setenv:found_model=1"
-    
-    # If we found "model", try to extract its value in a separate rule
-    SecRule REQUEST_BODY "@rx \"model\"\s*:\s*\"([^\"]+)\"" \
-           "id:3000,phase:2,pass,log,auditlog,capture,msg:'Extracted model name: %{TX.1}',setenv:model=%{TX.1}"
-</IfModule>
-
-# Simple default proxy - just one backend for now
-ProxyPass "/" "http://triton1.internal/v1/chat/completions"
+    # Basic function - proxy everything
+    ProxyPass "http://triton1.internal/v1/chat/completions"
+    ProxyPassReverse "http://triton1.internal/v1/chat/completions"
+</Location>
 
 # CORS headers
 Header always set Access-Control-Allow-Origin "*"
 Header always set Access-Control-Allow-Headers "Content-Type, Authorization"
 Header always set Access-Control-Allow-Methods "POST, GET, OPTIONS"
-
-# Debug headers to see what's happening
-Header always set X-Found-Model "%{found_model}e" env=found_model
-Header always set X-Model-Name "%{model}e" env=model
-Header always set X-Content-Type "%{REQUEST_HEADERS:Content-Type}e"
+Header always set Cache-Control "no-store"
