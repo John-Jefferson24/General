@@ -18,12 +18,12 @@ LoadModule headers_module modules/mod_headers.so
     SecDebugLog /var/log/httpd/modsec_debug.log
     SecDebugLogLevel 0
 
-    # Only parse JSON if Content-Type matches
-    SecRule REQUEST_HEADERS:Content-Type "application/json" "phase:1,t:none,nolog,pass"
+    SecRule REQUEST_HEADERS:Content-Type "application/json" \
+    "id:1000,phase:1,pass,nolog,ctl:requestBodyProcessor=JSON"
 
-    # Extract the "model" field from the JSON request body
-    SecRule REQUEST_BODY "@rx \"model\"\s*:\s*\"([^\"]+)\"" \
-        "phase:2,t:none,pass,setvar:tx.model_name=\1,setenv:MODEL_NAME=\1,nolog"
+SecRule REQUEST_BODY "@rx \"model\"\s*:\s*\"([^\"]+)\"" \
+    "id:2000,phase:2,pass,t:none,setvar:tx.model_name=\1,setenv:MODEL_NAME=\1,nolog"
+
 </IfModule>
 
 # === mod_rewrite: Route based on extracted model name ===
