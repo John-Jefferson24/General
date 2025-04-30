@@ -1,25 +1,31 @@
-## DIAGNOSTIC REQUEST LOGGING CONFIGURATION ##
+## FIXED DIAGNOSTIC REQUEST LOGGING ##
 
 # Load only necessary modules
 LoadModule proxy_module modules/mod_proxy.so
 LoadModule proxy_http_module modules/mod_proxy_http.so
 LoadModule headers_module modules/mod_headers.so
+LoadModule setenvif_module modules/mod_setenvif.so
 
 # Maximum logging
 LogLevel debug
 ErrorLog /var/log/httpd/proxy_error.log
 CustomLog /var/log/httpd/proxy_access.log combined
 
-# Log details about the incoming request
+# Capture Content-Type header for debugging
+SetEnvIf Content-Type "(.*)" CONTENT_TYPE=$1
+
+# Global settings
+ProxyRequests Off
+ProxyPreserveHost On
+
+# Basic function - proxy everything with headers
 <Location "/">
     # Set response headers with request details
     Header always set X-Request-Method "%{REQUEST_METHOD}s"
     Header always set X-Request-URI "%{REQUEST_URI}s"
-    Header always set X-Content-Type "%{Content-Type}i"
-    Header always set X-Host "%{Host}i"
-    Header always set X-User-Agent "%{User-Agent}i"
+    Header always set X-Content-Type "%{CONTENT_TYPE}e" env=CONTENT_TYPE
     
-    # Basic function - proxy everything
+    # Basic proxy function
     ProxyPass "http://triton1.internal/v1/chat/completions"
     ProxyPassReverse "http://triton1.internal/v1/chat/completions"
 </Location>
