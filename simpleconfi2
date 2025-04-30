@@ -1,4 +1,4 @@
-## OPTIMIZED MODEL PROXY CONFIGURATION ##
+## SIMPLIFIED MODEL PROXY CONFIGURATION (SINGLE MODEL) ##
 
 # Load only necessary modules
 LoadModule proxy_module modules/mod_proxy.so
@@ -7,7 +7,7 @@ LoadModule security2_module modules/mod_security2.so
 LoadModule headers_module modules/mod_headers.so
 LoadModule rewrite_module modules/mod_rewrite.so
 
-# Logging - reduced to standard level now that things are working
+# Logging
 LogLevel warn
 ErrorLog /var/log/httpd/proxy_error.log
 CustomLog /var/log/httpd/proxy_access.log combined
@@ -16,12 +16,12 @@ CustomLog /var/log/httpd/proxy_access.log combined
 ProxyRequests Off
 ProxyPreserveHost On
 
-# ModSecurity for JSON parsing and model extraction
+# Enable ModSecurity to parse JSON and extract the model name
 <IfModule mod_security2.c>
     SecRuleEngine On
     SecRequestBodyAccess On
     
-    # Increased request body limits for large model inputs (200MB)
+    # Increased request body limits for large model inputs
     SecRequestBodyLimit 209715200
     SecRequestBodyLimitAction ProcessPartial
     
@@ -29,36 +29,29 @@ ProxyPreserveHost On
     SecRule REQUEST_HEADERS:Content-Type "application/json" \
            "id:1000,phase:1,pass,ctl:requestBodyProcessor=JSON"
     
-    # Extract model name - simple capture rule
+    # Extract model name - use a simple SecRule that works
     SecRule REQUEST_BODY:model ".*" \
            "id:2000,phase:2,capture,pass,setenv:model=%{TX.0}"
 </IfModule>
 
-# Enable URL rewriting
+# Enable URL rewriting for environment-based path modification
 RewriteEngine On
 
-# Model-based routing
-# Route different model requests to their specific backends
+# Single model routing example
 RewriteCond %{ENV:model} ^gpt-model-1$ [NC]
-RewriteRule ^(.*)$ http://triton1.internal/v1/chat/completions [P,L]
+RewriteRule ^(.*)$ /model1$1 [PT,L]
 
-RewriteCond %{ENV:model} ^gpt-model-2$ [NC]
-RewriteRule ^(.*)$ http://triton2.internal/v1/chat/completions [P,L]
+# ProxyPass directive for the model path
+ProxyPass "/model1" "http://triton1.internal/v1/chat/completions"
 
-RewriteCond %{ENV:model} ^gpt-model-3$ [NC]
-RewriteRule ^(.*)$ http://triton3.internal/v1/chat/completions [P,L]
+# Default fallback - this is crucial
+ProxyPass "/" "http://triton1.internal/v1/chat/completions"
 
-RewriteCond %{ENV:model} ^gpt-model-4$ [NC]
-RewriteRule ^(.*)$ http://triton4.internal/v1/chat/completions [P,L]
-
-RewriteCond %{ENV:model} ^gpt-model-5$ [NC]
-RewriteRule ^(.*)$ http://triton5.internal/v1/chat/completions [P,L]
-
-# Default fallback for any unmatched model
-RewriteRule ^(.*)$ http://triton1.internal/v1/chat/completions [P,L]
-
-# Essential headers for compatibility with client libraries and streaming
+# CORS headers for API compatibility
 Header always set Access-Control-Allow-Origin "*"
 Header always set Access-Control-Allow-Headers "Content-Type, Authorization"
 Header always set Access-Control-Allow-Methods "POST, GET, OPTIONS"
 Header always set Cache-Control "no-store"
+
+# Debug header to confirm which model was requested
+Header always set X-Debug-Model "%{model}e" env=model
