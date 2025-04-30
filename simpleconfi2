@@ -1,14 +1,13 @@
-## DEBUG MODEL ROUTING CONFIGURATION ##
+## MINIMAL MODEL EXTRACTION CONFIGURATION ##
 
 # Load only necessary modules
 LoadModule proxy_module modules/mod_proxy.so
 LoadModule proxy_http_module modules/mod_proxy_http.so
 LoadModule security2_module modules/mod_security2.so
 LoadModule headers_module modules/mod_headers.so
-LoadModule rewrite_module modules/mod_rewrite.so
 
-# Increased logging for debugging
-LogLevel debug
+# Logging with maximum detail for ModSecurity
+LogLevel warn
 ErrorLog /var/log/httpd/proxy_error.log
 CustomLog /var/log/httpd/proxy_access.log combined
 
@@ -16,53 +15,41 @@ CustomLog /var/log/httpd/proxy_access.log combined
 ProxyRequests Off
 ProxyPreserveHost On
 
-# Enable ModSecurity to parse JSON and extract the model name
+# ModSecurity configuration focused solely on model extraction
 <IfModule mod_security2.c>
+    # Enable the engine and access to request bodies
     SecRuleEngine On
     SecRequestBodyAccess On
     
-    # Increased request body limits for large model inputs
-    SecRequestBodyLimit 209715200
-    SecRequestBodyLimitAction ProcessPartial
-    
-    # Enable JSON parsing with detailed logging
-    SecDebugLogLevel 3
+    # Maximum logging for ModSecurity
+    SecDebugLogLevel 9
+    SecAuditLogParts ABCFHZ
+    SecAuditEngine RelevantOnly
+    SecAuditLog /var/log/httpd/modsec_audit.log
     SecDebugLog /var/log/httpd/modsec_debug.log
     
+    # Enable JSON body processor with logging
     SecRule REQUEST_HEADERS:Content-Type "application/json" \
-           "id:1000,phase:1,pass,ctl:requestBodyProcessor=JSON"
+           "id:1000,phase:1,pass,log,auditlog,msg:'Enabling JSON processor',ctl:requestBodyProcessor=JSON"
     
-    # Extract model name with logging
-    SecRule REQUEST_BODY:model ".*" \
-           "id:2000,phase:2,capture,pass,setenv:model=%{TX.0},log"
+    # Try a simplified model extraction with full logging
+    SecRule REQUEST_BODY "@contains model" \
+           "id:2000,phase:2,pass,log,auditlog,msg:'Found model in body',setenv:found_model=1"
+    
+    # If we found "model", try to extract its value in a separate rule
+    SecRule REQUEST_BODY "@rx \"model\"\s*:\s*\"([^\"]+)\"" \
+           "id:3000,phase:2,pass,log,auditlog,capture,msg:'Extracted model name: %{TX.1}',setenv:model=%{TX.1}"
 </IfModule>
 
-# Enable URL rewriting with detailed logging
-RewriteEngine On
-RewriteLogLevel 9
-RewriteLog /var/log/httpd/rewrite.log
-
-# Print all environment variables to the log for debugging
-RewriteRule .* - [E=DUMP:%{ENV:ALL}]
-
-# Single model routing with detailed pattern match
-# Make sure we're looking for exactly what's in the request
-RewriteCond %{ENV:model} gpt-model-1 [NC]
-RewriteRule ^(.*)$ /model1$1 [PT,L]
-
-# ProxyPass directive for the model path
-ProxyPass "/model1" "http://triton1.internal/v1/chat/completions"
-
-# Default fallback - keep this working
+# Simple default proxy - just one backend for now
 ProxyPass "/" "http://triton1.internal/v1/chat/completions"
 
-# CORS headers for API compatibility
+# CORS headers
 Header always set Access-Control-Allow-Origin "*"
 Header always set Access-Control-Allow-Headers "Content-Type, Authorization"
 Header always set Access-Control-Allow-Methods "POST, GET, OPTIONS"
-Header always set Cache-Control "no-store"
 
-# Debug headers to see all variables
-Header always set X-Debug-Model "%{model}e" env=model
-Header always set X-Debug-URI "%{REQUEST_URI}e"
-Header always set X-Debug-Method "%{REQUEST_METHOD}e"
+# Debug headers to see what's happening
+Header always set X-Found-Model "%{found_model}e" env=found_model
+Header always set X-Model-Name "%{model}e" env=model
+Header always set X-Content-Type "%{REQUEST_HEADERS:Content-Type}e"
