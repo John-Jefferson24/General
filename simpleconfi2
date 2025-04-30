@@ -1,0 +1,53 @@
+## SIMPLIFIED MODEL PROXY CONFIGURATION ##
+
+# Load only necessary modules
+LoadModule proxy_module modules/mod_proxy.so
+LoadModule proxy_http_module modules/mod_proxy_http.so
+LoadModule rewrite_module modules/mod_rewrite.so
+LoadModule security2_module modules/mod_security2.so
+LoadModule headers_module modules/mod_headers.so
+
+# Maximum debugging
+LogLevel debug
+ErrorLog /var/log/httpd/proxy_error.log
+CustomLog /var/log/httpd/proxy_access.log combined
+
+<VirtualHost *:80>
+    # Make sure we're not serving static files
+    DocumentRoot "/var/www/empty"
+    
+    # Basic settings
+    ProxyPreserveHost On
+    ProxyRequests Off
+    
+    # ModSecurity config for JSON parsing
+    <IfModule mod_security2.c>
+        SecRuleEngine On
+        SecRequestBodyAccess On
+        
+        # Enable JSON body processor
+        SecRule REQUEST_HEADERS:Content-Type "application/json" \
+               "id:1,phase:1,pass,nolog,ctl:requestBodyProcessor=JSON"
+        
+        # Extract model name and set an environment variable - only one simple rule
+        SecRule REQUEST_BODY:model ".*" \
+               "id:2,phase:2,capture,pass,setenv:model=%{TX.0}"
+               
+        # Maximum debug logging
+        SecDebugLogLevel 3
+        SecDebugLog /var/log/httpd/modsec_debug.log
+    </IfModule>
+    
+    # Simple direct ProxyPass - no rewrite rules yet
+    # This will catch ALL requests and send them to the default backend
+    ProxyPass "/" "http://triton1.internal/v1/chat/completions"
+    ProxyPassReverse "/" "http://triton1.internal/v1/chat/completions"
+    
+    # CORS headers
+    Header always set Access-Control-Allow-Origin "*"
+    Header always set Access-Control-Allow-Headers "Content-Type, Authorization"
+    Header always set Access-Control-Allow-Methods "POST, GET, OPTIONS"
+    
+    # For debugging, output the model name if we found it
+    Header always set X-Debug-Model "%{model}e" env=model
+</VirtualHost>
