@@ -13,8 +13,6 @@ ErrorLog /var/log/httpd/proxy_error.log
 CustomLog /var/log/httpd/proxy_access.log combined
 
 <VirtualHost *:80>
-    # ServerName removed as it's unnecessary for functional routing
-    
     ProxyPreserveHost On
     
     # ModSecurity for JSON parsing and model extraction (read-only, no modification)
@@ -27,36 +25,59 @@ CustomLog /var/log/httpd/proxy_access.log combined
         SecRequestBodyLimit 209715200
         SecRequestBodyLimitAction ProcessPartial
         
-        # Enable JSON processing and extract model name - without modifying the content
-        SecRule REQUEST_HEADERS:Content-Type "application/json" "id:1000,pass,nolog,ctl:requestBodyProcessor=JSON"
-        SecRule REQUEST_BODY "@rx \"model\"\s*:\s*\"([^\"]+)\"" "id:2000,phase:2,pass,t:none,setvar:tx.model_name=\1,setenv:MODEL_NAME=\1,nolog"
+        # Enable JSON processing
+        SecRule REQUEST_HEADERS:Content-Type "application/json" "id:1000,pass,ctl:requestBodyProcessor=JSON"
         
-        # Security logging (minimal)
-        SecDebugLogLevel 0
-        SecAuditEngine Off
+        # Extract specific model names and set routing variables
+        SecRule REQUEST_BODY:model "@streq gpt-model-1" "id:2001,phase:2,pass,setvar:tx.model_route=model1,setenv:MODEL_ROUTE=model1"
+        SecRule REQUEST_BODY:model "@streq gpt-model-2" "id:2002,phase:2,pass,setvar:tx.model_route=model2,setenv:MODEL_ROUTE=model2"
+        SecRule REQUEST_BODY:model "@streq gpt-model-3" "id:2003,phase:2,pass,setvar:tx.model_route=model3,setenv:MODEL_ROUTE=model3"
+        SecRule REQUEST_BODY:model "@streq gpt-model-4" "id:2004,phase:2,pass,setvar:tx.model_route=model4,setenv:MODEL_ROUTE=model4"
+        SecRule REQUEST_BODY:model "@streq gpt-model-5" "id:2005,phase:2,pass,setvar:tx.model_route=model5,setenv:MODEL_ROUTE=model5"
+        
+        # Debug logging for ModSecurity
+        SecDebugLogLevel 3
+        SecDebugLog /var/log/httpd/modsec_debug.log
     </IfModule>
     
     # URL rewriting for request routing
     RewriteEngine On
+    RewriteLogLevel 3
     
-    # Model-based routing based on extracted model name
-    RewriteCond %{ENV:MODEL_NAME} ^gpt-model-1$ [NC]
-    RewriteRule ^/$ http://triton1.internal/ [P,L]
-    RewriteCond %{ENV:MODEL_NAME} ^gpt-model-2$ [NC]
-    RewriteRule ^/$ http://triton2.internal/ [P,L]
-    RewriteCond %{ENV:MODEL_NAME} ^gpt-model-3$ [NC]
-    RewriteRule ^/$ http://triton3.internal/ [P,L]
-    RewriteCond %{ENV:MODEL_NAME} ^gpt-model-4$ [NC]
-    RewriteRule ^/$ http://triton4.internal/ [P,L]
-    RewriteCond %{ENV:MODEL_NAME} ^gpt-model-5$ [NC]
-    RewriteRule ^/$ http://triton5.internal/ [P,L]
+    # Debug logging
+    RewriteLog /var/log/httpd/rewrite.log
     
-    # Forward client IP and model information
+    # Model routing based on the model_route variable
+    RewriteCond %{ENV:MODEL_ROUTE} ^model1$
+    RewriteRule ^/$ /model1 [PT]
+    
+    RewriteCond %{ENV:MODEL_ROUTE} ^model2$
+    RewriteRule ^/$ /model2 [PT]
+    
+    RewriteCond %{ENV:MODEL_ROUTE} ^model3$
+    RewriteRule ^/$ /model3 [PT]
+    
+    RewriteCond %{ENV:MODEL_ROUTE} ^model4$
+    RewriteRule ^/$ /model4 [PT]
+    
+    RewriteCond %{ENV:MODEL_ROUTE} ^model5$
+    RewriteRule ^/$ /model5 [PT]
+    
+    # Now set up the ProxyPass directives for each model route
+    ProxyPass /model1 http://triton1.internal/v1/chat/completions
+    ProxyPass /model2 http://triton2.internal/v1/chat/completions
+    ProxyPass /model3 http://triton3.internal/v1/chat/completions
+    ProxyPass /model4 http://triton4.internal/v1/chat/completions
+    ProxyPass /model5 http://triton5.internal/v1/chat/completions
+    
+    # Default fallback for root - use model1
+    RewriteRule ^/$ /model1 [PT]
+    
+    # Forward client IP 
     RequestHeader set X-Forwarded-For %{REMOTE_ADDR}s
-    RequestHeader set X-Model-Name "%{MODEL_NAME}e" env=MODEL_NAME
     
-    # Fallback for unmatched models
-    RewriteRule ^/$ http://triton1.internal/ [P,L]
+    # Add debug header
+    RequestHeader set X-Model-Route "%{MODEL_ROUTE}e" env=MODEL_ROUTE
     
     # Streaming compatibility headers for OpenAI, LangChain, and other frameworks
     Header always set Access-Control-Allow-Origin "*"
