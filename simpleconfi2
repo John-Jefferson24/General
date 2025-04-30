@@ -1,4 +1,4 @@
-## SIMPLIFIED MODEL PROXY CONFIGURATION (SINGLE MODEL) ##
+## DEBUG MODEL ROUTING CONFIGURATION ##
 
 # Load only necessary modules
 LoadModule proxy_module modules/mod_proxy.so
@@ -7,8 +7,8 @@ LoadModule security2_module modules/mod_security2.so
 LoadModule headers_module modules/mod_headers.so
 LoadModule rewrite_module modules/mod_rewrite.so
 
-# Logging
-LogLevel warn
+# Increased logging for debugging
+LogLevel debug
 ErrorLog /var/log/httpd/proxy_error.log
 CustomLog /var/log/httpd/proxy_access.log combined
 
@@ -25,26 +25,35 @@ ProxyPreserveHost On
     SecRequestBodyLimit 209715200
     SecRequestBodyLimitAction ProcessPartial
     
-    # Enable JSON parsing
+    # Enable JSON parsing with detailed logging
+    SecDebugLogLevel 3
+    SecDebugLog /var/log/httpd/modsec_debug.log
+    
     SecRule REQUEST_HEADERS:Content-Type "application/json" \
            "id:1000,phase:1,pass,ctl:requestBodyProcessor=JSON"
     
-    # Extract model name - use a simple SecRule that works
+    # Extract model name with logging
     SecRule REQUEST_BODY:model ".*" \
-           "id:2000,phase:2,capture,pass,setenv:model=%{TX.0}"
+           "id:2000,phase:2,capture,pass,setenv:model=%{TX.0},log"
 </IfModule>
 
-# Enable URL rewriting for environment-based path modification
+# Enable URL rewriting with detailed logging
 RewriteEngine On
+RewriteLogLevel 9
+RewriteLog /var/log/httpd/rewrite.log
 
-# Single model routing example
-RewriteCond %{ENV:model} ^gpt-model-1$ [NC]
+# Print all environment variables to the log for debugging
+RewriteRule .* - [E=DUMP:%{ENV:ALL}]
+
+# Single model routing with detailed pattern match
+# Make sure we're looking for exactly what's in the request
+RewriteCond %{ENV:model} gpt-model-1 [NC]
 RewriteRule ^(.*)$ /model1$1 [PT,L]
 
 # ProxyPass directive for the model path
 ProxyPass "/model1" "http://triton1.internal/v1/chat/completions"
 
-# Default fallback - this is crucial
+# Default fallback - keep this working
 ProxyPass "/" "http://triton1.internal/v1/chat/completions"
 
 # CORS headers for API compatibility
@@ -53,5 +62,7 @@ Header always set Access-Control-Allow-Headers "Content-Type, Authorization"
 Header always set Access-Control-Allow-Methods "POST, GET, OPTIONS"
 Header always set Cache-Control "no-store"
 
-# Debug header to confirm which model was requested
+# Debug headers to see all variables
 Header always set X-Debug-Model "%{model}e" env=model
+Header always set X-Debug-URI "%{REQUEST_URI}e"
+Header always set X-Debug-Method "%{REQUEST_METHOD}e"
