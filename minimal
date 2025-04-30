@@ -1,18 +1,10 @@
-## MINIMAL TEST PROXY CONFIGURATION ##
+SetEnv API_KEY "your-secret-api-key-here"
 
-# Load only necessary modules
-LoadModule proxy_module modules/mod_proxy.so
-LoadModule proxy_http_module modules/mod_proxy_http.so
-
-# Detailed logging
-LogLevel debug
-ErrorLog /var/log/httpd/proxy_error.log
-CustomLog /var/log/httpd/proxy_access.log combined
-
-# Direct, simple proxy - no VirtualHost, no special config
-ProxyRequests Off
-ProxyPreserveHost On
-
-# Forward all requests to the backend
-ProxyPass "/" "http://triton1.internal/v1/chat/completions"
-ProxyPassReverse "/" "http://triton1.internal/v1/chat/completions"
+# API Key Authentication check
+# This checks for valid API key in the Authorization header
+RewriteEngine On
+RewriteCond %{HTTP:Authorization} ^Bearer\ (.+)$ [NC]
+RewriteRule .* - [E=AUTH_BEARER:%1]
+RewriteCond %{ENV:AUTH_BEARER} !^$ 
+RewriteCond %{ENV:AUTH_BEARER} !^%{ENV:API_KEY}$ [NC]
+RewriteRule .* - [F,L]
