@@ -1,0 +1,18 @@
+## MINIMAL TEST PROXY CONFIGURATION ##
+
+# Load only necessary modules
+LoadModule proxy_module modules/mod_proxy.so
+LoadModule proxy_http_module modules/mod_proxy_http.so
+
+# Detailed logging
+LogLevel debug
+ErrorLog /var/log/httpd/proxy_error.log
+CustomLog /var/log/httpd/proxy_access.log combined
+
+# Direct, simple proxy - no VirtualHost, no special config
+ProxyRequests Off
+ProxyPreserveHost On
+
+# Forward all requests to the backend
+ProxyPass "/" "http://triton1.internal/v1/chat/completions"
+ProxyPassReverse "/" "http://triton1.internal/v1/chat/completions"
