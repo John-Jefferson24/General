@@ -1,37 +1,89 @@
-## FIXED DIAGNOSTIC REQUEST LOGGING ##
+## MODEL ROUTING USING WSGI ##
 
-# Load only necessary modules
+# Load necessary modules
 LoadModule proxy_module modules/mod_proxy.so
 LoadModule proxy_http_module modules/mod_proxy_http.so
+LoadModule wsgi_module modules/mod_wsgi.so
 LoadModule headers_module modules/mod_headers.so
-LoadModule setenvif_module modules/mod_setenvif.so
 
-# Maximum logging
-LogLevel debug
+# Logging
+LogLevel warn
 ErrorLog /var/log/httpd/proxy_error.log
 CustomLog /var/log/httpd/proxy_access.log combined
-
-# Capture Content-Type header for debugging
-SetEnvIf Content-Type "(.*)" CONTENT_TYPE=$1
 
 # Global settings
 ProxyRequests Off
 ProxyPreserveHost On
 
-# Basic function - proxy everything with headers
-<Location "/">
-    # Set response headers with request details
-    Header always set X-Request-Method "%{REQUEST_METHOD}s"
-    Header always set X-Request-URI "%{REQUEST_URI}s"
-    Header always set X-Content-Type "%{CONTENT_TYPE}e" env=CONTENT_TYPE
-    
-    # Basic proxy function
-    ProxyPass "http://triton1.internal/v1/chat/completions"
-    ProxyPassReverse "http://triton1.internal/v1/chat/completions"
-</Location>
+# Define WSGI script for model extraction
+WSGIScriptAlias "/model_router" "/var/www/wsgi/model_router.py"
+
+# WSGI directory permissions
+<Directory "/var/www/wsgi">
+    Require all granted
+</Directory>
+
+# Proxy configurations for each model
+ProxyPass "/model/gpt-model-1" "http://triton1.internal/v1/chat/completions"
+ProxyPass "/model/gpt-model-2" "http://triton2.internal/v1/chat/completions"
+ProxyPass "/model/gpt-model-3" "http://triton3.internal/v1/chat/completions"
+ProxyPass "/model/gpt-model-4" "http://triton4.internal/v1/chat/completions"
+ProxyPass "/model/gpt-model-5" "http://triton5.internal/v1/chat/completions"
+
+# Default proxy
+ProxyPass "/" "http://triton1.internal/v1/chat/completions"
 
 # CORS headers
 Header always set Access-Control-Allow-Origin "*"
 Header always set Access-Control-Allow-Headers "Content-Type, Authorization"
 Header always set Access-Control-Allow-Methods "POST, GET, OPTIONS"
 Header always set Cache-Control "no-store"
+
+#!/usr/bin/env python3
+import json
+import sys
+
+def application(environ, start_response):
+    # Get request method and content length
+    method = environ.get('REQUEST_METHOD', 'GET')
+    
+    # Only process POST requests with content
+    if method == 'POST':
+        try:
+            # Read the request body
+            content_length = int(environ.get('CONTENT_LENGTH', 0))
+            body = environ['wsgi.input'].read(content_length)
+            
+            # Parse the JSON
+            data = json.loads(body)
+            
+            # Extract the model name
+            model_name = data.get('model', '')
+            
+            # Determine the redirect URL based on model name
+            redirect_url = '/'
+            if model_name:
+                redirect_url = f'/model/{model_name}'
+            
+            # Redirect to the appropriate endpoint
+            start_response('307 Temporary Redirect', [
+                ('Location', redirect_url),
+                ('Content-Type', 'text/plain'),
+            ])
+            return [b'Redirecting to model endpoint']
+            
+        except Exception as e:
+            # Log the error and continue to default endpoint
+            sys.stderr.write(f"Error processing model: {str(e)}\n")
+            start_response('307 Temporary Redirect', [
+                ('Location', '/'),
+                ('Content-Type', 'text/plain'),
+            ])
+            return [b'Error processing model, redirecting to default endpoint']
+    
+    # For non-POST requests or other cases, redirect to default
+    start_response('307 Temporary Redirect', [
+        ('Location', '/'),
+        ('Content-Type', 'text/plain'),
+    ])
+    return [b'Redirecting to default endpoint']
