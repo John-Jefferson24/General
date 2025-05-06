@@ -1,1 +1,168 @@
+from typing import Optional
+from ges_entitlements.service import EntitlementsService
+import configparser
+import os
 
+class Singleton(type):
+    _instances = {}
+    
+    def __call__(cls, *args, **kwargs):
+        if cls not in cls._instances:
+            cls._instances[cls] = super(Singleton, cls).__call__(*args, **kwargs)
+        return cls._instances[cls]
+
+@staticmethod
+def _read_and_validate_config_file() -> configparser.ConfigParser:
+    config_file_path = os.environ.get("PROXY_CONFIG_PATH", "config.ini")
+    config_parser = configparser.ConfigParser()
+    raw_config = config_parser.read(config_file_path)
+    print("raw_config :", raw_config)
+    if len(raw_config) < 1:
+        raise FileNotFoundError(f"Could not read config file at {os.path.abspath(config_file_path)}")
+    
+    required_sections = ["proxy.settings", "ges.settings"]
+    for section in required_sections:
+        if section not in config_parser.sections():
+            raise KeyError(f"Could not find required section {section} in config file")
+    
+    return config_parser
+
+class GesEntitlementService(metaclass=Singleton):
+    def __init__(self):
+        """
+        The configParser from reading the configuration file
+        """
+        self._config = _read_and_validate_config_file()
+        host = self._config["ges.settings"]["ges_host"]
+        port = self._config["ges.settings"]["ges_port"]
+        namespace = self._config["ges.settings"]["ges_namespace"]
+        client_id = self._config["ges.settings"]["ges_client_id"]
+        client_key = self._config["ges.settings"]["ges_client_key"]
+        self._service = EntitlementsService(host, port, namespace, clientId=client_id, clientKey=client_key)
+    
+    @property
+    def ges_service(self):
+        return self._service
+    
+    def _is_allowed(self, user: str, action: str, resource: str, **kw):
+        """Check whether a user is allowed to perform an action on a resource or resources."""
+        
+        allowed = self.ges_service.is_allowed(user, action, resource)
+        if not allowed:
+            print(" user not allowed")
+        return {'message': 'Success'}
+    
+    def is_login_allowed(self, user: str, resource: str, component: Optional[str] = None):
+        """
+        Validates the entitlements of a user to the login resource, using GES entitlement resource
+        
+        Args:
+            user: The nbk of the user, subject of the request
+            resource_path: The resource path to validate against
+            component: An optional attribute from the caller to show where the request is being originated
+        """
+        
+        service = GesEntitlementService(self._config)
+        return service.is_allowed(user=user, action='login', resource=resource, component=component)
+        
+    def get_permitted_resources(user: str, action: str =None):
+        """Returns the resources permitted to a given user.
+        Example:
+            >>> service = GesEntitlementService()
+            >>> service.get_permitted_resources('George', 'play')
+            set(['/squash'])
+            >>> service.get_permitted_resources('George', ['play', 'eat'])
+            {'play': set(['/squash']), 'eat': set(['/burger'])}
+            >>> service.get_permitted_resources('George')
+            {'play': set(['/squash']), 'eat': set(['/burger']), 'drink': set(['/water'])}
+        Args:
+            user: The nbk of the user, subject of the request.
+            action: action to be performed
+        Returns:
+            The format of the result is dependent on the number of actions given:
+            - Single action: a simple set of resources
+            - Multiple actions: a dict of sets of resources keyed on the action provided
+            - No action: a dict of sets of resources keyed on all permitted actions
+        """
+        
+        service = GesEntitlementService(self._config)
+        return service.ges_service.get_permitted_resources(user, action)
+        
+    def is_in_role(user: str, role: str):
+        """ Returns if the subject is in the role specified
+        Args:
+            user: The nbk of the user, subject of the request
+            role: role to check if a assigned to
+        """
+        
+        service = GesEntitlementService(self._config)
+        return service.ges_service.is_in_role(user, role)
+        
+    def is_in_group(user: str, group: str):
+        """Returns if the subject is in the group specified
+        Args:
+            user: The nbk of the user, subject of the request
+            group: group to check if a member of. Example: 'trader', 'admin', 'superuser'
+        """
+        
+        service = GesEntitlementService(self._config)
+        return service.ges_service.is_in_group(user, group)
+        
+    def get_user_groups(user: str):
+        """Returns all of the groups for the specified subjec
+        Args:
+            user: The nbk of the user, subject of the request
+        """
+        
+        service = GesEntitlementService(self._config)
+        return service.ges_service.get_groups(user)
+        
+    def get_user_roles(user: str):
+        """Returns all of the roles for the specified subject
+        Args:
+            user: The nbk of the user, subject of the request
+        """
+        
+        service = GesEntitlementService(self._config)
+        return service.ges_service.get_roles(user)
+        
+    def get_users_in_role(role):
+        """
+        Returns a list of subject Ids that for the subjects that are in the specified role
+        The result of the call lists all of the subjects by their NBK Id.
+        The call result will include subjects that are assigned the role both directly and via a team_in_role predi
+        
+        Args:
+            role: role for which all the subjects assigned to the role are returned.
+        """
+        
+        service = GesEntitlementService(self._config)
+        return service.ges_service.get_subjects_in_role(role)
+        
+    def get_users_in_group(group: str):
+        """
+        Returns a list of user/subject Ids that for the subjects that are in the specified group
+        The result of the call lists all of the subjects by their NBK Id.
+        The call result will include subjects that are assigned the group both directly and via a team_member_of pre
+        
+        Args:
+            group: group for which all the subjects assigned to the role are returned.
+        """
+        
+        service = GesEntitlementService(self._config)
+        return service.ges_service.get_subjects_in_group(group)
+        
+    def get_all_groups():
+        """Returns a list of all of the Groups that are in the Namespace"""
+        service = GesEntitlementService(self._config)
+        return service.ges_service.get_all_groups()
+        
+    def get_all_roles():
+        """Returns a list of all of the Roles that are in the Namespace"""
+        service = GesEntitlementService(self._config)
+        return service.ges_service.get_all_roles()
+        
+    def get_all_users():
+        """Returns a list of all of the Users/Subjects that are mapped in the Namespace"""
+        service = GesEntitlementService(self._config)
+        return service.ges_service.get_all_subjects()
