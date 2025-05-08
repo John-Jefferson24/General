@@ -1,0 +1,151 @@
+# auth_endpoint.py
+import json
+import sys
+import os
+import requests
+from urllib.parse import urlencode, parse_qs
+
+# SSO Configuration
+PING_FEDERATE_BASE_URL = "https://pingfederate.yourcompany.com"
+AUTHORIZE_URL = f"{PING_FEDERATE_BASE_URL}/as/authorization.oauth2"
+TOKEN_URL = f"{PING_FEDERATE_BASE_URL}/as/token.oauth2"
+CLIENT_ID = "your-client-id"
+CLIENT_SECRET = "your-client-secret"
+REDIRECT_URI = "https://your-api.example.com/auth"
+
+def application(environ, start_response):
+    # Check if we're receiving a callback with an authorization code
+    query_string = environ.get('QUERY_STRING', '')
+    params = parse_qs(query_string)
+    code = params.get('code', [''])[0]
+    
+    if not code:
+        # Initial visit - redirect to Ping Federate
+        auth_params = {
+            "client_id": CLIENT_ID,
+            "response_type": "code",
+            "scope": "openid profile",
+            "redirect_uri": REDIRECT_URI
+        }
+        
+        auth_url = f"{AUTHORIZE_URL}?{urlencode(auth_params)}"
+        
+        start_response('302 Found', [
+            ('Location', auth_url),
+            ('Content-Type', 'text/plain')
+        ])
+        return [b'Redirecting to authentication service...']
+    
+    else:
+        # We have a code - exchange it for a token
+        try:
+            # Exchange code for token
+            token_payload = {
+                "grant_type": "authorization_code",
+                "code": code,
+                "client_id": CLIENT_ID,
+                "client_secret": CLIENT_SECRET,
+                "redirect_uri": REDIRECT_URI
+            }
+            
+            token_response = requests.post(TOKEN_URL, data=token_payload)
+            
+            if token_response.status_code != 200:
+                raise ValueError(f"Token request failed: {token_response.text}")
+            
+            token_data = token_response.json()
+            access_token = token_data.get("access_token")
+            
+            # Display the token to the user
+            html_response = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Authentication Successful</title>
+                <style>
+                    body {{ font-family: Arial, sans-serif; margin: 40px; }}
+                    .token-box {{ 
+                        background-color: #f7f7f7; 
+                        padding: 20px; 
+                        border-radius: 5px;
+                        word-break: break-all;
+                    }}
+                    .copy-button {{
+                        background-color: #4CAF50;
+                        border: none;
+                        color: white;
+                        padding: 10px 20px;
+                        text-align: center;
+                        text-decoration: none;
+                        display: inline-block;
+                        font-size: 16px;
+                        margin: 10px 0;
+                        cursor: pointer;
+                        border-radius: 5px;
+                    }}
+                </style>
+                <script>
+                    function copyToken() {{
+                        const tokenElement = document.getElementById('token');
+                        const textArea = document.createElement('textarea');
+                        textArea.value = tokenElement.textContent;
+                        document.body.appendChild(textArea);
+                        textArea.select();
+                        document.execCommand('copy');
+                        document.body.removeChild(textArea);
+                        
+                        const button = document.getElementById('copyButton');
+                        button.textContent = 'Copied!';
+                        setTimeout(() => {{
+                            button.textContent = 'Copy Token';
+                        }}, 2000);
+                    }}
+                </script>
+            </head>
+            <body>
+                <h1>Authentication Successful</h1>
+                <p>You have successfully authenticated. Here is your access token:</p>
+                <div class="token-box">
+                    <pre id="token">{access_token}</pre>
+                </div>
+                <button id="copyButton" class="copy-button" onclick="copyToken()">Copy Token</button>
+                <h2>How to use your token</h2>
+                <p>Include this token in your API requests as a Bearer token in the Authorization header:</p>
+                <div class="token-box">
+                    <pre>Authorization: Bearer {access_token}</pre>
+                </div>
+                <h3>Example Python code:</h3>
+                <div class="token-box">
+                    <pre>
+import requests
+
+headers = {{
+    "Authorization": "Bearer {access_token}",
+    "Content-Type": "application/json"
+}}
+
+payload = {{
+    "model": "gpt-model-3",
+    "messages": [{{"role": "user", "content": "What is the capital of France?"}}]
+}}
+
+response = requests.post("https://your-api.example.com/", headers=headers, json=payload)
+print(response.json())
+                    </pre>
+                </div>
+            </body>
+            </html>
+            """
+            
+            start_response('200 OK', [
+                ('Content-Type', 'text/html'),
+                ('Content-Length', str(len(html_response)))
+            ])
+            return [html_response.encode('utf-8')]
+            
+        except Exception as e:
+            error_message = f"Error during authentication: {str(e)}"
+            start_response('500 Internal Server Error', [
+                ('Content-Type', 'text/plain')
+            ])
+            return [error_message.encode('utf-8')]
