@@ -1,92 +1,47 @@
-### 🧩 Triton 25.03 OpenAI-Compatible Frontend – Parameter Support Matrix
-
-| Parameter                 | Supported (Completion) | Supported (Embedding) | Notes                                                                 |
-|--------------------------|-------------------------|------------------------|-----------------------------------------------------------------------|
-| `model`                  | ✅ Yes                  | ✅ Yes                 | Required for both endpoints.                                         |
-| `prompt`                 | ✅ Yes                  | ❌ No                  | Used for completions only.                                           |
-| `input`                  | ❌ No                   | ✅ Yes                 | Required for embeddings.                                             |
-| `max_tokens`             | ✅ Yes                  | ❌ No                  | Generation limit for completions.                                    |
-| `temperature`            | ✅ Yes                  | ❌ No                  | Sampling control for completions.                                    |
-| `top_k`                  | ✅ Yes                  | ❌ No                  | Sampling control.                                                    |
-| `top_p`                  | ✅ Yes                  | ❌ No                  | Nucleus sampling.                                                    |
-| `stop`                   | ✅ Partial              | ❌ No                  | Supported for completions; stop behavior may vary.                   |
-| `stream`                 | ✅ Yes                  | ❌ Not applicable      | Streaming supported for completions only.                            |
-| `logprobs`               | ⚠️ Not returned         | ❌ No                  | Logprobs not returned even if requested.                             |
-| `presence_penalty`       | ✅ Yes                  | ❌ No                  | Completion penalty.                                                  |
-| `frequency_penalty`      | ✅ Yes                  | ❌ No                  | Completion penalty.                                                  |
-| `best_of`                | ✅ Yes                  | ❌ No                  | Server-side best-of selection.                                       |
-| `n`                      | ✅ Yes                  | ✅ Yes                 | Multiple completions or embeddings.                                  |
-| `stop_words`             | ✅ Yes                  | ❌ No                  | Only relevant for text generation.                                   |
-| `bad_words`              | ✅ Yes                  | ❌ No                  | Suppress certain tokens during generation.                           |
-| `beam_width`             | ✅ Yes                  | ❌ No                  | Beam search config.                                                  |
-| `length_penalty`         | ✅ Yes                  | ❌ No                  | For beam search.                                                     |
-| `repetition_penalty`     | ✅ Yes                  | ❌ No                  | Prevent repeating tokens.                                            |
-| `random_seed`            | ✅ Yes                  | ❌ No                  | Randomness control.                                                  |
-| `return_log_probs`       | ✅ Yes                  | ❌ No                  | Only for completions.                                                |
-| `return_context_logits`  | ✅ Yes                  | ❌ No                  | Optional logits.                                                     |
-| `return_generation_logits`| ✅ Yes                 | ❌ No                  | Optional logits.                                                     |
-| `exclude_input_in_output`| ✅ Yes                  | ❌ No                  | Remove prompt from output.                                           |
-| `user`                   | ✅ Yes                  | ✅ Yes                 | User ID passthrough.                                                 |
-| `dimensions`             | ❌ No                   | ⚠️ Partial             | May be supported by models like JinaAI.                              |
-| `encoding_format`        | ❌ No                   | ❌ No                  | Not supported.                                                       |
-| `truncate`               | ❌ No                   | ❌ No                  | Not supported.                                                       |
-| `usage`                  | ❌ No                   | ❌ No                  | Token usage not returned in either API.                              |
-| `metadata`               | ❌ No                   | ⚠️ Partial             | Some models return metadata, e.g. JinaAI.                            |
-| `task`                   | ❌ No                   | ⚠️ Backend config      | Must be set at model load (`--task=embedding` for E5).               |
-| `normalize`              | ❌ No                   | ⚠️ Model-dependent     | Some embedding models normalize vectors by default.                  |
-| `logit_bias`             | ❌ No                   | ❌ No                  | Not supported.                                                       |
-| `functions`              | ❌ No                   | ❌ No                  | Function calling not supported.                                      |
-| `function_call`          | ❌ No                   | ❌ No                  | Not supported.                                                       |
-| `tools`                  | ❌ No                   | ❌ No                  | Not supported.                                                       |
-| `tool_choice`            | ❌ No                   | ❌ No                  | Not supported.                                                       |
-| `response_format`        | ❌ No                   | ❌ No                  | Format customization not supported.                                  |
-| `seed`                   | ⚠️ Alias for `random_seed`| ❌ No                | Use `random_seed` explicitly.                                        |
-| `echo`                   | ❌ No                   | ❌ No                  | Not supported.                                                       |
-| `suffix`                 | ❌ No                   | ❌ No                  | Not supported.                                                       |
-
+h3. 🧩 Triton 25.03 OpenAI-Compatible Frontend – Parameter Support Matrix
 
 || Parameter || Supported (Completion) || Supported (Embedding) || Notes ||
-| `model` | ✅ Yes | ✅ Yes | Required for both endpoints. |
-| `prompt` | ✅ Yes | ❌ No | Used for completions only. |
-| `input` | ❌ No | ✅ Yes | Required for embeddings. |
-| `max_tokens` | ✅ Yes | ❌ No | Generation limit for completions. |
-| `temperature` | ✅ Yes | ❌ No | Sampling control for completions. |
-| `top_k` | ✅ Yes | ❌ No | Sampling control. |
-| `top_p` | ✅ Yes | ❌ No | Nucleus sampling. |
-| `stop` | ✅ Partial | ❌ No | Supported for completions; stop behavior may vary. |
-| `stream` | ✅ Yes | ❌ Not applicable | Streaming supported for completions only. |
-| `logprobs` | ⚠️ Not returned | ❌ No | Logprobs not returned even if requested. |
-| `presence_penalty` | ✅ Yes | ❌ No | Completion penalty. |
-| `frequency_penalty` | ✅ Yes | ❌ No | Completion penalty. |
-| `best_of` | ✅ Yes | ❌ No | Server-side best-of selection. |
-| `n` | ✅ Yes | ✅ Yes | Multiple completions or embeddings. |
-| `stop_words` | ✅ Yes | ❌ No | Only relevant for text generation. |
-| `bad_words` | ✅ Yes | ❌ No | Suppress certain tokens during generation. |
-| `beam_width` | ✅ Yes | ❌ No | Beam search config. |
-| `length_penalty` | ✅ Yes | ❌ No | For beam search. |
-| `repetition_penalty` | ✅ Yes | ❌ No | Prevent repeating tokens. |
-| `random_seed` | ✅ Yes | ❌ No | Randomness control. |
-| `return_log_probs` | ✅ Yes | ❌ No | Only for completions. |
-| `return_context_logits` | ✅ Yes | ❌ No | Optional logits. |
-| `return_generation_logits` | ✅ Yes | ❌ No | Optional logits. |
-| `exclude_input_in_output` | ✅ Yes | ❌ No | Remove prompt from output. |
-| `user` | ✅ Yes | ✅ Yes | User ID passthrough. |
-| `dimensions` | ❌ No | ⚠️ Partial | May be supported by models like JinaAI. |
-| `encoding_format` | ❌ No | ❌ No | Not supported. |
-| `truncate` | ❌ No | ❌ No | Not supported. |
-| `usage` | ⚠️ Partial | ⚠️ Partial | `prompt_tokens`, `completion_tokens`, and `total_tokens` may not be returned or may be zeroed. |
-| `metadata` | ❌ No | ⚠️ Partial | Some models return metadata, e.g. JinaAI. |
-| `task` | ❌ No | ⚠️ Backend config | Must be set at model load (`--task=embedding` for E5). |
-| `normalize` | ❌ No | ⚠️ Model-dependent | Some embedding models normalize vectors by default. |
-| `logit_bias` | ❌ No | ❌ No | Not supported. |
-| `functions` | ❌ No | ❌ No | Function calling not supported. |
-| `function_call` | ❌ No | ❌ No | Not supported. |
-| `tools` | ❌ No | ❌ No | Not supported. |
-| `tool_choice` | ❌ No | ❌ No | Not supported. |
-| `response_format` | ❌ No | ❌ No | Format customization not supported. |
-| `seed` | ⚠️ Alias for `random_seed` | ❌ No | Use `random_seed` explicitly. |
-| `echo` | ❌ No | ❌ No | Not supported. |
-| `suffix` | ❌ No | ❌ No | Not supported. |
-| `prompt_tokens` | ⚠️ Not reliably returned | ❌ No | Sometimes returned in `usage`, often missing or zero. |
-| `completion_tokens` | ⚠️ Not reliably returned | ❌ No | Same as `prompt_tokens`. |
-| `total_tokens` | ⚠️ Not reliably returned | ❌ No | Total tokens may be returned inconsistently. |
+| model | ✅ Yes | ✅ Yes | Required for both endpoints. |
+| prompt | ✅ Yes | ❌ No | Used for completions only. |
+| input | ❌ No | ✅ Yes | Required for embeddings. |
+| max_tokens | ✅ Yes | ❌ No | Generation limit for completions. |
+| temperature | ✅ Yes | ❌ No | Sampling randomness control. |
+| top_k | ✅ Yes | ❌ No | Sampling control. |
+| top_p | ✅ Yes | ❌ No | Nucleus sampling. |
+| stop | ✅ Partial | ❌ No | Supported for completions; behavior may vary. |
+| stream | ✅ Yes | ❌ Not applicable | Only for completions. |
+| logprobs | ⚠️ Not returned | ❌ No | Not returned even if requested. |
+| presence_penalty | ✅ Yes | ❌ No | Penalizes new tokens based on their presence. |
+| frequency_penalty | ✅ Yes | ❌ No | Penalizes based on token frequency. |
+| best_of | ✅ Yes | ❌ No | Generates multiple completions server-side and returns the best. |
+| n | ✅ Yes | ✅ Yes | Controls number of completions or embeddings returned. |
+| stop_words | ✅ Yes | ❌ No | Suppresses sequences. |
+| bad_words | ✅ Yes | ❌ No | Suppresses specific tokens during generation. |
+| beam_width | ✅ Yes | ❌ No | Beam search control. |
+| length_penalty | ✅ Yes | ❌ No | Beam search score adjustment. |
+| repetition_penalty | ✅ Yes | ❌ No | Penalizes repeated tokens. |
+| random_seed | ✅ Yes | ❌ No | For deterministic generation. |
+| return_log_probs | ✅ Yes | ❌ No | Log probs of generated tokens. |
+| return_context_logits | ✅ Yes | ❌ No | Logits for prompt context. |
+| return_generation_logits | ✅ Yes | ❌ No | Logits for generated tokens. |
+| exclude_input_in_output | ✅ Yes | ❌ No | Removes prompt from response. |
+| user | ✅ Yes | ✅ Yes | User identifier passthrough. |
+| dimensions | ❌ No | ⚠️ Partial | Only supported by some embeddings (e.g., JinaAI). |
+| encoding_format | ❌ No | ❌ No | Not supported. |
+| truncate | ❌ No | ❌ No | Not supported. |
+| usage | ⚠️ Partial | ⚠️ Partial | Tokens may be missing or zero in response. |
+| metadata | ❌ No | ⚠️ Partial | Some models like JinaAI may return metadata. |
+| task | ❌ No | ⚠️ Backend config | Must be passed at load time (e.g., --task=embedding for E5). |
+| normalize | ❌ No | ⚠️ Model-dependent | Embedding vector normalization varies. |
+| logit_bias | ❌ No | ❌ No | Not implemented. |
+| functions | ❌ No | ❌ No | Not supported. |
+| function_call | ❌ No | ❌ No | Not supported. |
+| tools | ❌ No | ❌ No | Not supported. |
+| tool_choice | ❌ No | ❌ No | Not supported. |
+| response_format | ❌ No | ❌ No | Cannot return non-JSON formats. |
+| seed | ⚠️ Alias for random_seed | ❌ No | Prefer random_seed. |
+| echo | ❌ No | ❌ No | Not implemented. |
+| suffix | ❌ No | ❌ No | Not supported. |
+| prompt_tokens | ⚠️ Not reliably returned | ❌ No | Often missing or zeroed in usage. |
+| completion_tokens | ⚠️ Not reliably returned | ❌ No | Same as above. |
+| total_tokens | ⚠️ Not reliably returned | ❌ No | Often inconsistent. |
