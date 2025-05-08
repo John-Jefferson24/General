@@ -129,7 +129,7 @@ class GesEntitlementService(metaclass=Singleton):
     def get_users_in_role(role):
         """
         Returns a list of subject Ids that for the subjects that are in the specified role
-        The result of the call lists all of the subjects by their NBK Id.
+        The result of the call lists all of the subjects by their id
         The call result will include subjects that are assigned the role both directly and via a team_in_role predi
         
         Args:
@@ -142,7 +142,7 @@ class GesEntitlementService(metaclass=Singleton):
     def get_users_in_group(group: str):
         """
         Returns a list of user/subject Ids that for the subjects that are in the specified group
-        The result of the call lists all of the subjects by their NBK Id.
+        The result of the call lists all of the subjects by their id
         The call result will include subjects that are assigned the group both directly and via a team_member_of pre
         
         Args:
