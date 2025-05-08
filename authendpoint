@@ -3,6 +3,9 @@ import json
 import sys
 import os
 import requests
+import base64
+import hashlib
+import secrets
 from urllib.parse import urlencode, parse_qs
 
 # SSO Configuration
@@ -11,41 +14,53 @@ AUTHORIZE_URL = f"{PING_FEDERATE_BASE_URL}/as/authorization.oauth2"
 TOKEN_URL = f"{PING_FEDERATE_BASE_URL}/as/token.oauth2"
 CLIENT_ID = "your-client-id"
 CLIENT_SECRET = "your-client-secret"
-REDIRECT_URI = "https://your-api.example.com/auth"
+REDIRECT_URI = "https://your-api.example.com/auth/callback"
+
+# Simple in-memory session store
+session_store = {}
+
+def generate_code_verifier():
+    """Generate a random code verifier for PKCE"""
+    return secrets.token_urlsafe(64)[:128]
+
+def generate_code_challenge(code_verifier):
+    """Generate a code challenge from the code verifier using SHA-256"""
+    digest = hashlib.sha256(code_verifier.encode()).digest()
+    return base64.urlsafe_b64encode(digest).decode().rstrip('=')
 
 def application(environ, start_response):
-    # Check if we're receiving a callback with an authorization code
-    query_string = environ.get('QUERY_STRING', '')
-    params = parse_qs(query_string)
-    code = params.get('code', [''])[0]
+    # Get the path_info to determine the endpoint
+    path_info = environ.get('PATH_INFO', '')
     
-    if not code:
-        # Initial visit - redirect to Ping Federate
-        auth_params = {
-            "client_id": CLIENT_ID,
-            "response_type": "code",
-            "scope": "openid profile",
-            "redirect_uri": REDIRECT_URI
-        }
+    # Handle callback from Ping Federate
+    if path_info == '/callback':
+        # Parse the query parameters
+        query_string = environ.get('QUERY_STRING', '')
+        params = parse_qs(query_string)
+        code = params.get('code', [''])[0]
+        state = params.get('state', [''])[0]
         
-        auth_url = f"{AUTHORIZE_URL}?{urlencode(auth_params)}"
+        if not code or not state:
+            error_message = "Missing code or state parameter"
+            start_response('400 Bad Request', [('Content-Type', 'text/plain')])
+            return [error_message.encode('utf-8')]
         
-        start_response('302 Found', [
-            ('Location', auth_url),
-            ('Content-Type', 'text/plain')
-        ])
-        return [b'Redirecting to authentication service...']
-    
-    else:
-        # We have a code - exchange it for a token
         try:
-            # Exchange code for token
+            # Retrieve the code_verifier using the state parameter
+            if state not in session_store:
+                raise ValueError("Invalid state parameter")
+            
+            code_verifier = session_store[state]
+            del session_store[state]  # Clean up
+            
+            # Exchange code for token with PKCE
             token_payload = {
                 "grant_type": "authorization_code",
                 "code": code,
                 "client_id": CLIENT_ID,
                 "client_secret": CLIENT_SECRET,
-                "redirect_uri": REDIRECT_URI
+                "redirect_uri": REDIRECT_URI,
+                "code_verifier": code_verifier
             }
             
             token_response = requests.post(TOKEN_URL, data=token_payload)
@@ -56,96 +71,96 @@ def application(environ, start_response):
             token_data = token_response.json()
             access_token = token_data.get("access_token")
             
-            # Display the token to the user
+            # Simple HTML response
             html_response = f"""
             <!DOCTYPE html>
             <html>
             <head>
-                <title>Authentication Successful</title>
+                <title>Authentication Token</title>
                 <style>
-                    body {{ font-family: Arial, sans-serif; margin: 40px; }}
+                    body {{ font-family: Arial, sans-serif; margin: 40px; text-align: center; }}
                     .token-box {{ 
                         background-color: #f7f7f7; 
                         padding: 20px; 
                         border-radius: 5px;
+                        text-align: left;
+                        margin: 20px auto;
+                        max-width: 600px;
                         word-break: break-all;
                     }}
-                    .copy-button {{
+                    button {{
                         background-color: #4CAF50;
                         border: none;
                         color: white;
                         padding: 10px 20px;
                         text-align: center;
-                        text-decoration: none;
-                        display: inline-block;
                         font-size: 16px;
-                        margin: 10px 0;
                         cursor: pointer;
                         border-radius: 5px;
                     }}
                 </style>
                 <script>
                     function copyToken() {{
-                        const tokenElement = document.getElementById('token');
-                        const textArea = document.createElement('textarea');
-                        textArea.value = tokenElement.textContent;
-                        document.body.appendChild(textArea);
-                        textArea.select();
-                        document.execCommand('copy');
-                        document.body.removeChild(textArea);
-                        
-                        const button = document.getElementById('copyButton');
-                        button.textContent = 'Copied!';
-                        setTimeout(() => {{
-                            button.textContent = 'Copy Token';
-                        }}, 2000);
+                        const token = document.getElementById('token').textContent;
+                        navigator.clipboard.writeText(token).then(() => {{
+                            document.getElementById('copyButton').textContent = 'Copied!';
+                            setTimeout(() => {{
+                                document.getElementById('copyButton').textContent = 'Copy Token';
+                            }}, 2000);
+                        }});
                     }}
                 </script>
             </head>
             <body>
                 <h1>Authentication Successful</h1>
-                <p>You have successfully authenticated. Here is your access token:</p>
+                <p>Your access token:</p>
                 <div class="token-box">
                     <pre id="token">{access_token}</pre>
                 </div>
-                <button id="copyButton" class="copy-button" onclick="copyToken()">Copy Token</button>
-                <h2>How to use your token</h2>
-                <p>Include this token in your API requests as a Bearer token in the Authorization header:</p>
-                <div class="token-box">
-                    <pre>Authorization: Bearer {access_token}</pre>
-                </div>
-                <h3>Example Python code:</h3>
-                <div class="token-box">
-                    <pre>
-import requests
-
-headers = {{
-    "Authorization": "Bearer {access_token}",
-    "Content-Type": "application/json"
-}}
-
-payload = {{
-    "model": "gpt-model-3",
-    "messages": [{{"role": "user", "content": "What is the capital of France?"}}]
-}}
-
-response = requests.post("https://your-api.example.com/", headers=headers, json=payload)
-print(response.json())
-                    </pre>
-                </div>
+                <button id="copyButton" onclick="copyToken()">Copy Token</button>
+                <p>For usage instructions, please visit our <a href="https://wiki.yourcompany.com/api-docs">API documentation</a>.</p>
             </body>
             </html>
             """
             
-            start_response('200 OK', [
-                ('Content-Type', 'text/html'),
-                ('Content-Length', str(len(html_response)))
-            ])
+            start_response('200 OK', [('Content-Type', 'text/html')])
             return [html_response.encode('utf-8')]
             
         except Exception as e:
             error_message = f"Error during authentication: {str(e)}"
-            start_response('500 Internal Server Error', [
-                ('Content-Type', 'text/plain')
-            ])
+            start_response('500 Internal Server Error', [('Content-Type', 'text/plain')])
             return [error_message.encode('utf-8')]
+    
+    # Main endpoint - initiate the authentication flow
+    elif path_info == '' or path_info == '/':
+        # Generate PKCE parameters
+        code_verifier = generate_code_verifier()
+        code_challenge = generate_code_challenge(code_verifier)
+        state = secrets.token_urlsafe(16)
+        
+        # Store the code_verifier for later use
+        session_store[state] = code_verifier
+        
+        # Redirect to Ping Federate
+        auth_params = {
+            "client_id": CLIENT_ID,
+            "response_type": "code",
+            "scope": "openid profile",
+            "redirect_uri": REDIRECT_URI,
+            "state": state,
+            "code_challenge": code_challenge,
+            "code_challenge_method": "S256"
+        }
+        
+        auth_url = f"{AUTHORIZE_URL}?{urlencode(auth_params)}"
+        
+        start_response('302 Found', [
+            ('Location', auth_url),
+            ('Content-Type', 'text/plain')
+        ])
+        return [b'Redirecting to authentication service...']
+    
+    # Unknown path
+    else:
+        start_response('404 Not Found', [('Content-Type', 'text/plain')])
+        return [b'Not Found']
