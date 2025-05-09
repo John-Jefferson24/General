@@ -1,101 +1,82 @@
-## MODEL ROUTING USING WSGI ##
-
-# Global settings
-ProxyRequests Off
-ProxyPreserveHost On
-
-# Route specific paths to WSGI scripts using regex patterns
-# OpenAI API v1 and v2 endpoints
-WSGIScriptAliasMatch "^/(v1|v2)/" "/var/www/wsgi/model_router.py"
-
-# Auth endpoints
-WSGIScriptAliasMatch "^/auth(/.*)?$" "/var/www/wsgi/sso.py"
-
-# WSGI directory permissions
-<Directory "/var/www/wsgi">
-    Require all granted
-</Directory>
-
-# Proxy configurations for each model - WITH TRAILING SLASHES
-ProxyPass "/model/llama70b/" "http://llama-backend:9000/"
-ProxyPass "/model/mistral7b/" "http://mistral-backend:9000/"
-ProxyPass "/model/mixtral/" "http://mixtral-backend:9000/"
-ProxyPass "/model/claude3/" "http://claude-backend:9000/"
-ProxyPass "/model/gpt-4/" "http://gpt4-backend:9000/"
-
-# Default proxy for OpenAI API paths when no model is specified
-ProxyPass "/v1/" "http://default-backend:9000/v1/"
-ProxyPass "/v2/" "http://default-backend:9000/v2/"
-
-# CORS headers
-Header always set Access-Control-Allow-Origin "*"
-Header always set Access-Control-Allow-Headers "Content-Type, Authorization"
-Header always set Access-Control-Allow-Methods "POST, GET, OPTIONS"
-Header always set Cache-Control "no-store"
-
 #!/usr/bin/env python3
 import json
 import sys
 import urllib.parse
 
 def application(environ, start_response):
-    # Get request method and the original path
     method = environ.get('REQUEST_METHOD', 'GET')
     original_path = environ.get('PATH_INFO', '')
     query_string = environ.get('QUERY_STRING', '')
-    
     model_name = ''
-    
-    # Process POST requests - extract model from JSON body
+
+    # Handle POST requests (e.g., /v1/chat/completions)
     if method == 'POST':
         try:
-            # Read the request body
             content_length = int(environ.get('CONTENT_LENGTH', 0))
             body = environ['wsgi.input'].read(content_length)
-            
-            # Parse the JSON
             data = json.loads(body)
-            
-            # Extract the model name
             model_name = data.get('model', '')
         except Exception as e:
-            # Log the error
-            sys.stderr.write(f"Error processing POST body: {str(e)}\n")
-    
-    # Process GET requests - extract model from query string
+            sys.stderr.write(f"[router] POST parse error: {e}\n")
+
+    # Handle GET requests (e.g., /v1/models?model=abc)
     elif method == 'GET':
         try:
-            # Parse the query string
-            query_params = urllib.parse.parse_qs(query_string)
-            
-            # Extract model from query params if present
-            model_param = query_params.get('model', [''])
-            if model_param and model_param[0]:
-                model_name = model_param[0]
-                
-                # Remove model from query string for forwarding
-                new_params = {k: v for k, v in query_params.items() if k != 'model'}
-                new_query = urllib.parse.urlencode(new_params, doseq=True)
-                query_string = new_query
+            params = urllib.parse.parse_qs(query_string)
+            model_param = params.get('model', [''])[0]
+            if model_param:
+                model_name = model_param
+                params.pop('model', None)
+                query_string = urllib.parse.urlencode(params, doseq=True)
         except Exception as e:
-            # Log the error
-            sys.stderr.write(f"Error processing GET query: {str(e)}\n")
-    
-    # Determine redirect based on whether model was found
+            sys.stderr.write(f"[router] GET parse error: {e}\n")
+
+    # Build redirect
     if model_name:
-        redirect_url = f'/model/{model_name}{original_path}'
-        # Add remaining query params if any
+        # Route to /model/{model}/<original_path>
+        new_path = f'/model/{model_name}{original_path}'
         if query_string:
-            redirect_url += f'?{query_string}'
-    else:
-        # No model specified, use original path
-        redirect_url = original_path
-        if query_string:
-            redirect_url += f'?{query_string}'
+            new_path += f'?{query_string}'
+        start_response('307 Temporary Redirect', [
+            ('Location', new_path),
+            ('Content-Type', 'text/plain'),
+        ])
+        return [b'Redirecting to model backend']
     
-    # Redirect to the appropriate endpoint
+    # If no model specified, fallback to default backend
     start_response('307 Temporary Redirect', [
-        ('Location', redirect_url),
+        ('Location', original_path + (f'?{query_string}' if query_string else '')),
         ('Content-Type', 'text/plain'),
     ])
-    return [b'Redirecting to model endpoint']
+    return [b'Redirecting to default backend']
+
+
+# --- WSGI Setup ---
+WSGIScriptAliasMatch "^/(v1|v2)/" "/var/www/wsgi/model_router.py"
+
+# --- Directory Access ---
+<Directory "/var/www/wsgi">
+    Require all granted
+</Directory>
+
+# --- CORS and Cache Control ---
+Header always set Access-Control-Allow-Origin "*"
+Header always set Access-Control-Allow-Headers "Content-Type, Authorization"
+Header always set Access-Control-Allow-Methods "POST, GET, OPTIONS"
+Header always set Cache-Control "no-store"
+
+# --- Model Backends (updated dynamically via ConfigMap) ---
+ProxyPass "/model/gpt-4/"       "http://gpt4-backend:9000/"
+ProxyPass "/model/llama70b/"    "http://llama-backend:9000/"
+ProxyPass "/model/mistral7b/"   "http://mistral-backend:9000/"
+ProxyPass "/model/mixtral/"     "http://mixtral-backend:9000/"
+ProxyPass "/model/claude3/"     "http://claude-backend:9000/"
+ProxyPass "/model/jina/"        "http://jina-backend:9000/"
+ProxyPass "/model/e5/"          "http://e5-backend:9000/"
+
+# --- Default fallbacks for /v1 and /v2 if no model specified ---
+ProxyPass "/v1/" "http://default-backend:9000/v1/"
+ProxyPass "/v2/" "http://default-backend:9000/v2/"
+
+# --- Optional auth or SSO endpoints (if used) ---
+WSGIScriptAliasMatch "^/auth(/.*)?$" "/var/www/wsgi/sso.py"
