@@ -1,16 +1,64 @@
-from openai import OpenAI
+#!/usr/bin/env python3
+import json
+import sys
 
-client = OpenAI(
-    api_key="sk-...",  # or use os.getenv("OPENAI_API_KEY")
-    base_url="http://your-hosted-endpoint/v1"  # required for non-OpenAI endpoints
-)
+def application(environ, start_response):
+    method = environ.get('REQUEST_METHOD', 'GET')
 
-response = client.chat.completions.create(
-    model="gpt-4",  # or your model name
-    messages=[
-        {"role": "system", "content": "You are a helpful assistant."},
-        {"role": "user", "content": "What is the capital of Germany?"}
-    ]
-)
+    if method == 'POST':
+        try:
+            content_length = int(environ.get('CONTENT_LENGTH', 0))
+            body = environ['wsgi.input'].read(content_length)
 
-print(response.choices[0].message.content)
+            # Decode and parse JSON
+            data = json.loads(body.decode('utf-8'))
+
+            # Extract model name
+            model_name = data.get('model', '').strip()
+
+            # Detect the type of OpenAI-compatible request
+            if 'messages' in data:
+                endpoint_type = 'chat'         # goes to /v1/chat/completions
+            elif 'prompt' in data:
+                endpoint_type = 'completions'  # goes to /v1/completions
+            else:
+                endpoint_type = 'chat'  # default if unclear
+
+            # Build redirect URL: e.g., /model/gpt-model-1/chat
+            if model_name:
+                redirect_url = f"/model/{model_name}/{endpoint_type}"
+            else:
+                redirect_url = f"/{endpoint_type}"
+
+            # Issue redirect
+            start_response('307 Temporary Redirect', [
+                ('Location', redirect_url),
+                ('Content-Type', 'text/plain'),
+            ])
+            return [b'Redirecting to model endpoint']
+
+        except Exception as e:
+            sys.stderr.write(f"model_router.py error: {str(e)}\n")
+            start_response('307 Temporary Redirect', [
+                ('Location', '/chat'),  # fallback to chat
+                ('Content-Type', 'text/plain'),
+            ])
+            return [b'Error processing model, fallback to /chat']
+
+    # Non-POST request fallback
+    start_response('307 Temporary Redirect', [
+        ('Location', '/chat'),
+        ('Content-Type', 'text/plain'),
+    ])
+    return [b'Redirecting to default endpoint']
+
+
+# Chat requests (OpenAI messages format)
+ProxyPass "/model/gpt-model-1/chat" "http://triton1.internal/v1/chat/completions"
+
+# Prompt-based requests (OpenAI completions format)
+ProxyPass "/model/gpt-model-1/completions" "http://triton1.internal/v1/completions"
+
+# Defaults
+ProxyPass "/chat" "http://triton1.internal/v1/chat/completions"
+ProxyPass "/completions" "http://triton1.internal/v1/completions"
