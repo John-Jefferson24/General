@@ -46,3 +46,16 @@ def application(environ, start_response):
         ('Content-Type', 'text/plain'),
     ])
     return [b'Redirecting to default endpoint']
+
+import requests
+
+response = requests.post(
+    "https://your-api.com/v2",
+    headers={"Authorization": "Bearer your-api-key"},
+    json={
+        "model": "text-embedding-3-large",
+        "input": "Text to embed"
+    }
+)
+
+embedding = response.json()["embeddings"][0]
