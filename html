@@ -1,0 +1,36 @@
+# After obtaining access_token in your callback handler
+
+# Create a simple HTML response with the download link
+html_response = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Authentication Successful</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; text-align: center; padding: 20px; }}
+        .download-btn {{ 
+            background: #4CAF50; 
+            color: white; 
+            padding: 10px 20px; 
+            border-radius: 4px; 
+            text-decoration: none; 
+            display: inline-block; 
+            margin-top: 20px; 
+        }}
+    </style>
+</head>
+<body>
+    <h2>Authentication Successful!</h2>
+    <p>Click below to download your API token:</p>
+    
+    <a href="data:application/json;charset=utf-8,{{"token": "{access_token}"}}" 
+       download="api_token.json" 
+       class="download-btn">
+       Download Token
+    </a>
+</body>
+</html>
+"""
+
+start_response('200 OK', [('Content-Type', 'text/html')])
+return [html_response.encode('utf-8')]
