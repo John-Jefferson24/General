@@ -1,16 +1,16 @@
-$env:OPENAI_API_KEY = "sk-your-key-here"
+from openai import OpenAI
 
-import openai
-import os
+client = OpenAI(
+    api_key="sk-...",  # or use os.getenv("OPENAI_API_KEY")
+    base_url="http://your-hosted-endpoint/v1"  # required for non-OpenAI endpoints
+)
 
-openai.api_key = os.getenv("OPENAI_API_KEY")
-
-response = openai.ChatCompletion.create(
-    model="gpt-4",
+response = client.chat.completions.create(
+    model="gpt-4",  # or your model name
     messages=[
         {"role": "system", "content": "You are a helpful assistant."},
-        {"role": "user", "content": "What is the capital of Japan?"}
+        {"role": "user", "content": "What is the capital of Germany?"}
     ]
 )
 
-print(response['choices'][0]['message']['content'])
+print(response.choices[0].message.content)
