@@ -51,15 +51,13 @@ def application(environ, start_response):
     return [b'{"error": "Only POST method is supported"}']
 
 # WSGI script mappings
-WSGIScriptAliasMatch "^/v1/" "/var/www/wsgi/v1_router.py"
+WSGIScriptAlias "/v1" "/var/www/wsgi/v1_router.py"
 WSGIScriptAlias "/v2" "/var/www/wsgi/v2_router.py"
 
 # v1 endpoint model-specific proxies
-ProxyPass "/model/llama70b/v1/" "http://llama-backend:9000/v1/"
-ProxyPass "/model/mistral7b/v1/" "http://mistral-backend:9000/v1/"
-ProxyPass "/model/mixtral/v1/" "http://mixtral-backend:9000/v1/"
-ProxyPass "/model/claude3/v1/" "http://claude-backend:9000/v1/"
-ProxyPass "/model/gpt-4/v1/" "http://gpt4-backend:9000/v1/"
+ProxyPass "/model/llama70b/v1" "http://llama-backend:9000/v1"
+ProxyPass "/model/mistral7b/v1" "http://mistral-backend:9000/v1"
+ProxyPass "/model/mixtral/v1" "http://mixtral-backend:9000/v1"
 
 # v2 endpoint model-specific proxies
 ProxyPass "/model/text-embedding-3-large/v2" "http://embedding-backend:9000/v2/models/text-embedding-3-large/generate"
