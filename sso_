@@ -13,7 +13,6 @@ PING_FEDERATE_BASE_URL = "https://pingfederate.yourcompany.com"
 AUTHORIZE_URL = f"{PING_FEDERATE_BASE_URL}/as/authorization.oauth2"
 TOKEN_URL = f"{PING_FEDERATE_BASE_URL}/as/token.oauth2"
 CLIENT_ID = "your-client-id"
-CLIENT_SECRET = "your-client-secret"
 REDIRECT_URI = "https://your-api.example.com/auth/callback"
 
 # Simple in-memory session store
@@ -58,7 +57,6 @@ def application(environ, start_response):
                 "grant_type": "authorization_code",
                 "code": code,
                 "client_id": CLIENT_ID,
-                "client_secret": CLIENT_SECRET,
                 "redirect_uri": REDIRECT_URI,
                 "code_verifier": code_verifier
             }
