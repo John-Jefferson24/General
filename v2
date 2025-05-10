@@ -3,20 +3,33 @@ import json
 import sys
 
 def application(environ, start_response):
+    # Get request method
     method = environ.get('REQUEST_METHOD', 'GET')
-
+    
+    # Only process POST requests
     if method == 'POST':
         try:
-            # Read and parse request body
+            # Read the request body
             content_length = int(environ.get('CONTENT_LENGTH', 0))
             body = environ['wsgi.input'].read(content_length)
+            
+            # Parse the JSON
             data = json.loads(body)
-
+            
             # Extract the model name
-            model_name = data.get('model')
+            model_name = data.get('model', '')
+            
+            # Log for debugging
+            print(f"V2 Router - Model: {model_name}")
+            sys.stdout.flush()
+            
+            # If no model specified, return error
             if not model_name:
-                raise ValueError("Missing 'model' in request")
-
+                print("ERROR: No model specified in request")
+                sys.stdout.flush()
+                start_response('400 Bad Request', [('Content-Type', 'application/json')])
+                return [b'{"error": "No model specified in request"}']
+            
             # Redirect to the model-specific endpoint
             redirect_url = f'/model/{model_name}/v2'
             start_response('307 Temporary Redirect', [
@@ -24,16 +37,14 @@ def application(environ, start_response):
                 ('Content-Type', 'text/plain'),
             ])
             return [b'Redirecting to model endpoint']
-
-        except Exception:
-            # Return 400 on parse/fallback error instead of looping
-            start_response('400 Bad Request', [
-                ('Content-Type', 'text/plain'),
-            ])
-            return [b'Invalid request: missing or bad JSON with model field']
-
-    # Reject non-POST requests explicitly
-    start_response('405 Method Not Allowed', [
-        ('Content-Type', 'text/plain'),
-    ])
-    return [b'Only POST requests are allowed']
+            
+        except Exception as e:
+            # Log the error and return error response
+            print(f"Error processing request: {str(e)}")
+            sys.stdout.flush()
+            start_response('500 Internal Server Error', [('Content-Type', 'application/json')])
+            return [f'{{"error": "Failed to process request: {str(e)}"'.encode('utf-8')]
+    
+    # For non-POST requests, return method not allowed
+    start_response('405 Method Not Allowed', [('Content-Type', 'application/json')])
+    return [b'{"error": "Only POST method is supported"}']
