@@ -1,34 +1,23 @@
-parameters [
-  {
-    key: "model"
-    value: { string_value: "mistralai/Mistral-Small-3.1-24B-Instruct-2503" }
-  },
-  {
-    key: "tensor_parallel_size"
-    value: { string_value: "2" }
-  },
-  {
-    key: "dtype"
-    value: { string_value: "bfloat16" }
-  },
-  {
-    key: "gpu_memory_utilization"
-    value: { string_value: "0.8" }
-  },
-  {
-    key: "enforce_eager"
-    value: { string_value: "true" }
-  },
-  {
-    key: "trust_remote_code"
-    value: { string_value: "true" }
-  },
-  {
-    key: "max_model_len"
-    value: { string_value: "8192" }
-  },
-  {
-    key: "chat_template_path"
-    value: { string_value: "/absolute/path/to/chat_template.json" }
-  }
-]
+pythonimport json
+
+# Load the JSON file
+with open("chat_template.json", "r") as f:
+    template_data = json.load(f)
+
+# Extract the Jinja template
+jinja_template = template_data["chat_template"]
+
+# Save it to a .jinja file
+with open("mistral_template.jinja", "w") as f:
+    f.write(jinja_template)
+
+
+    python3 openai_frontend/main.py \
+  --model-repository /path/to/your/vllm_models \
+  --tokenizer mistralai/Mistral-Small-3.1-24B-Instruct-2503 \
+  --tokenizer-mode mistral \
+  --config-format mistral \
+  --load-format mistral \
+  --tool-call-parser mistral \
+  --enable-auto-tool-choice \
+  --chat-template /path/to/mistral_template.jinja
