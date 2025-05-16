@@ -28,3 +28,31 @@ completion = client.chat.completions.create(
     max_tokens=200
 )
 print(completion.choices[0].message.content)
+
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:9000/v1", api_key="EMPTY")
+
+# Minimal image input (short base64 string for testing)
+test_base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACklEQVR4nGMAAQAABQABDQottAAAAABJRU5ErkJggg=="  # 1x1 pixel image
+
+messages = [
+    {"role": "system", "content": "You are a helpful assistant."},
+    {
+        "role": "user",
+        "content": [
+            {"type": "image", "image": test_base64},
+            {"type": "text", "text": "Describe this image."}
+        ]
+    }
+]
+
+try:
+    completion = client.chat.completions.create(
+        model="gemma-3-27b-it",
+        messages=messages,
+        max_tokens=200
+    )
+    print(completion.choices[0].message.content)
+except Exception as e:
+    print(f"Error: {str(e)}")
