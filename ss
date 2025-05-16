@@ -1,4 +1,4 @@
-name: "gemma-3-27b-it"  # Make sure this matches your model name
+name: "gemma-3-27b-it"
 backend: "vllm"
 
 input [
@@ -27,17 +27,27 @@ instance_group [
   # Your existing instance_group configuration
 ]
 
-parameters [
-  {
-    key: "enable_multimodal"
-    value: { string_value: "true" }
-  },
-  {
-    key: "vision_encoder_name"
-    value: { string_value: "siglip" }
-  },
-  {
-    key: "image_size" 
-    value: { string_value: "896" }
-  }
-]
+parameters {
+  key: "enable_multimodal"
+  value: { string_value: "true" }
+}
+
+parameters {
+  key: "vision_encoder_name"
+  value: { string_value: "siglip" }
+}
+
+parameters {
+  key: "image_size"
+  value: { string_value: "896" }
+}
+
+parameters {
+  key: "mm_use_vision_tower"
+  value: { string_value: "true" }
+}
+
+parameters {
+  key: "model_path"
+  value: { string_value: "/path/to/your/model/directory" }
+}
