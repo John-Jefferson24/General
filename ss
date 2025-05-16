@@ -9,14 +9,14 @@ client = OpenAI(base_url="http://localhost:9000/v1", api_key="EMPTY")
 image = Image.open("local_image.jpg").resize((896, 896))
 buffered = BytesIO()
 image.save(buffered, format="JPEG")
-image_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
+image_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")  # Just the base64 string
 
 messages = [
     {"role": "system", "content": "You are a helpful assistant."},
     {
         "role": "user",
         "content": [
-            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}},
+            {"type": "image", "image": image_base64},  # Pass base64 string directly
             {"type": "text", "text": "Describe this image in detail."}
         ]
     }
