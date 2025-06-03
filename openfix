@@ -1,118 +1,184 @@
-# COMPLETE OpenShift Security Context Fixes - All Settings That Cause Issues
-# Based on OpenShift Security Context Constraints (SCC) Documentation
+# ======================================================================
+# OpenShift Security Context Fixes for Snorkel Flow
+# ======================================================================
+# This script removes ALL security context settings that conflict with 
+# OpenShift Security Context Constraints (SCCs)
+#
+# Usage: .\fix-openshift-security.ps1 
+# Optional: .\fix-openshift-security.ps1 -ChartPath "C:\path\to\chart"
+# ======================================================================
 
 param(
-    [string]$ChartPath = "H:\oc\snorkelflow"
+    [string]$ChartPath = "H:\oc\snorkelflow",
+    [switch]$WhatIf = $false,
+    [switch]$Verbose = $false
 )
 
-Write-Host "🔧 COMPLETE OpenShift Security Context Fixes..." -ForegroundColor Green
-Write-Host "Chart Path: $ChartPath" -ForegroundColor Yellow
+# Color functions for better output
+function Write-Success { param($Message) Write-Host $Message -ForegroundColor Green }
+function Write-Info { param($Message) Write-Host $Message -ForegroundColor Cyan }
+function Write-Warning { param($Message) Write-Host $Message -ForegroundColor Yellow }
+function Write-Error { param($Message) Write-Host $Message -ForegroundColor Red }
+function Write-Detail { param($Message) Write-Host $Message -ForegroundColor Gray }
 
-$DeploymentPath = Join-Path $ChartPath "templates"
+# Script header
+Write-Host ""
+Write-Host "===============================================" -ForegroundColor Magenta
+Write-Host "  OpenShift Security Context Fixes" -ForegroundColor Magenta
+Write-Host "  Snorkel Flow Helm Chart Compatibility" -ForegroundColor Magenta
+Write-Host "===============================================" -ForegroundColor Magenta
+Write-Host ""
 
-if (-not (Test-Path $DeploymentPath)) {
-    Write-Host "❌ Templates directory not found: $DeploymentPath" -ForegroundColor Red
+Write-Info "🔧 Starting OpenShift Security Context Fixes..."
+Write-Info "📁 Chart Path: $ChartPath"
+
+if ($WhatIf) {
+    Write-Warning "🔍 WHAT-IF MODE: No changes will be made, only showing what would be changed"
+}
+
+# Validate chart directory
+$TemplatesPath = Join-Path $ChartPath "templates"
+
+if (-not (Test-Path $ChartPath)) {
+    Write-Error "❌ Chart directory not found: $ChartPath"
+    Write-Error "Please ensure the Snorkel Flow chart directory exists"
     exit 1
 }
 
-# Get all YAML files recursively
-$YamlFiles = Get-ChildItem -Path $DeploymentPath -Filter "*.yaml" -Recurse
-Write-Host "📁 Found $($YamlFiles.Count) YAML files to process" -ForegroundColor Cyan
+if (-not (Test-Path $TemplatesPath)) {
+    Write-Error "❌ Templates directory not found: $TemplatesPath"
+    Write-Error "Please ensure this is a valid Helm chart directory"
+    exit 1
+}
 
-# Create backup
-$BackupPath = Join-Path $ChartPath "templates_backup_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
-New-Item -ItemType Directory -Path $BackupPath -Force | Out-Null
-Write-Host "💾 Created backup: $BackupPath" -ForegroundColor Yellow
+Write-Success "✅ Found templates directory: $TemplatesPath"
+
+# Get all YAML files recursively
+$YamlFiles = Get-ChildItem -Path $TemplatesPath -Filter "*.yaml" -Recurse
+Write-Info "📁 Found $($YamlFiles.Count) YAML files to process across all subdirectories"
+
+if ($Verbose) {
+    Write-Info "📂 Directory structure:"
+    Get-ChildItem -Path $TemplatesPath -Directory | ForEach-Object { 
+        $fileCount = (Get-ChildItem -Path $_.FullName -Filter "*.yaml" -Recurse).Count
+        Write-Detail "   • $($_.Name): $fileCount YAML files"
+    }
+}
+
+# Create backup directory (skip in WhatIf mode)
+if (-not $WhatIf) {
+    $BackupPath = Join-Path $ChartPath "templates_backup_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
+    New-Item -ItemType Directory -Path $BackupPath -Force | Out-Null
+    Write-Warning "💾 Created backup directory: $BackupPath"
+}
 
 # Complete list of OpenShift-problematic security context settings
-$SecurityContextSettings = @(
-    # User/Group Identity Settings (OpenShift assigns these automatically)
-    'runAsUser',
-    'runAsGroup', 
-    'uid',
-    'gid',
-    'fsGroup',
-    'supplementalGroups',
-    'runAsNonRoot',
-    
-    # SELinux Settings (OpenShift manages these)
-    'seLinuxOptions',
-    
-    # Privilege Settings (Restricted by default SCC)
-    'privileged',
-    'allowPrivilegeEscalation',
-    
-    # Capabilities (Dropped by default SCC)
-    'capabilities',
-    'addCapabilities',
-    'dropCapabilities',
-    'defaultAddCapabilities',
-    'requiredDropCapabilities',
-    'allowedCapabilities',
-    
-    # Filesystem Settings (Can cause permission issues)
-    'readOnlyRootFilesystem',
-    'fsGroupChangePolicy',
-    
-    # Host Access Settings (Not allowed in restricted SCC)
-    'hostNetwork',
-    'hostPID',
-    'hostIPC',
-    'hostPorts',
-    
-    # Proc Mount Settings
-    'procMount',
-    
-    # AppArmor Settings  
-    'appArmorProfile',
-    
-    # Seccomp Settings
-    'seccompProfile',
-    
-    # Windows-specific Settings
-    'windowsOptions',
-    
-    # Sysctls Settings
-    'sysctls'
-)
+# Based on OpenShift Security Context Constraints documentation
+$SecurityContextSettings = @{
+    'User_Group_Identity' = @(
+        'runAsUser',      # User ID - OpenShift assigns from namespace range
+        'runAsGroup',     # Primary group ID - OpenShift assigns  
+        'uid',            # Alternative user ID specification
+        'gid',            # Group ID - OpenShift assigns
+        'fsGroup',        # Filesystem group ownership - OpenShift assigns
+        'supplementalGroups', # Additional groups - OpenShift manages
+        'runAsNonRoot'    # OpenShift handles this automatically
+    )
+    'Privilege_Settings' = @(
+        'privileged',           # Not allowed in restricted SCC
+        'allowPrivilegeEscalation' # Restricted by default SCC
+    )
+    'Capabilities' = @(
+        'capabilities',         # Linux capabilities
+        'addCapabilities',      # Capabilities to add
+        'dropCapabilities',     # Capabilities to drop
+        'defaultAddCapabilities', # Default added capabilities
+        'requiredDropCapabilities', # Required dropped capabilities
+        'allowedCapabilities'   # Allowed capabilities list
+    )
+    'Security_Labels' = @(
+        'seLinuxOptions',   # SELinux labels - OpenShift manages
+        'appArmorProfile',  # AppArmor profiles - not used in OpenShift
+        'seccompProfile'    # Seccomp profiles - OpenShift handles
+    )
+    'Filesystem_Settings' = @(
+        'readOnlyRootFilesystem', # Can cause write permission errors
+        'fsGroupChangePolicy'     # Filesystem group change policy
+    )
+    'Host_Access' = @(
+        'hostNetwork',  # Host network access - not allowed in restricted SCC
+        'hostPID',      # Host PID namespace - not allowed in restricted SCC
+        'hostIPC',      # Host IPC namespace - not allowed in restricted SCC
+        'hostPorts'     # Host port access - not allowed in restricted SCC
+    )
+    'Advanced_Settings' = @(
+        'procMount',       # Proc mount settings
+        'windowsOptions',  # Windows-specific settings
+        'sysctls'         # Kernel parameter settings
+    )
+}
+
+# Flatten all settings into one array for processing
+$AllSettings = @()
+$SecurityContextSettings.Values | ForEach-Object { $AllSettings += $_ }
+
+Write-Info "🔍 Will check for $($AllSettings.Count) different security context settings"
+
+# Process each file
+$TotalModified = 0
+$TotalChanges = 0
 
 foreach ($file in $YamlFiles) {
-    $relativePath = $file.FullName.Replace($DeploymentPath, "").TrimStart('\')
-    Write-Host "🔧 Processing: $relativePath" -ForegroundColor White
+    $relativePath = $file.FullName.Replace($TemplatesPath, "").TrimStart('\')
     
-    # Create backup with directory structure
-    $relativeDir = Split-Path $relativePath -Parent
-    if ($relativeDir) {
-        $backupSubDir = Join-Path $BackupPath $relativeDir
-        New-Item -ItemType Directory -Path $backupSubDir -Force | Out-Null
+    if ($Verbose) {
+        Write-Host "🔧 Processing: $relativePath" -ForegroundColor White
     }
-    $backupFilePath = Join-Path $BackupPath $relativePath
-    Copy-Item $file.FullName -Destination $backupFilePath -Force
+    
+    # Create backup with directory structure (skip in WhatIf mode)
+    if (-not $WhatIf) {
+        $relativeDir = Split-Path $relativePath -Parent
+        if ($relativeDir) {
+            $backupSubDir = Join-Path $BackupPath $relativeDir
+            New-Item -ItemType Directory -Path $backupSubDir -Force | Out-Null
+        }
+        $backupFilePath = Join-Path $BackupPath $relativePath
+        Copy-Item $file.FullName -Destination $backupFilePath -Force
+    }
     
     # Read and process content
     $content = Get-Content $file.FullName
     $modified = $false
+    $fileChanges = 0
     
     for ($i = 0; $i -lt $content.Length; $i++) {
         $line = $content[$i]
         
         # Check each security context setting
-        foreach ($setting in $SecurityContextSettings) {
+        foreach ($setting in $AllSettings) {
             if ($line -match "^\s*$setting\s*:") {
-                $content[$i] = $line -replace "(\s*)($setting\s*:)", '$1# $2'
+                if (-not $WhatIf) {
+                    $content[$i] = $line -replace "(\s*)($setting\s*:)", '$1# $2 # Removed for OpenShift compatibility'
+                }
                 $modified = $true
-                Write-Host "  ↳ Commented out $setting on line $($i+1)" -ForegroundColor Gray
+                $fileChanges++
+                $TotalChanges++
+                
+                if ($Verbose -or $WhatIf) {
+                    Write-Detail "  ↳ Line $($i+1): $setting"
+                }
                 break  # Only process one setting per line
             }
         }
         
         # Handle complete securityContext blocks that only contain restricted settings
         if ($line -match '^\s*securityContext:\s*$') {
-            $nextNonEmptyLine = $i + 1
-            $hasAllowedSettings = $false
             $currentIndent = ($line -replace '\S.*').Length
+            $nextNonEmptyLine = $i + 1
+            $hasOnlyRestrictedSettings = $true
+            $hasAnySettings = $false
             
-            # Look ahead to see what's in this securityContext block
+            # Look ahead to analyze this securityContext block
             while ($nextNonEmptyLine -lt $content.Length) {
                 $nextLine = $content[$nextNonEmptyLine]
                 
@@ -128,26 +194,14 @@ foreach ($file in $YamlFiles) {
                     break
                 }
                 
-                # Check if this securityContext has any allowed settings
-                $hasRestrictedOnly = $true
-                foreach ($setting in $SecurityContextSettings) {
-                    if ($nextLine -match "^\s*$setting\s*:") {
-                        $hasRestrictedOnly = $true
-                        break
-                    }
-                }
-                
-                # If we find any line that's not in our restricted list, keep the securityContext
-                if ($nextLine -match '^\s*\w+\s*:' -and $hasRestrictedOnly) {
-                    $foundRestricted = $false
-                    foreach ($setting in $SecurityContextSettings) {
-                        if ($nextLine -match "^\s*$setting\s*:") {
-                            $foundRestricted = $true
-                            break
-                        }
-                    }
-                    if (-not $foundRestricted) {
-                        $hasAllowedSettings = $true
+                # Check if this line is a setting
+                if ($nextLine -match '^\s*(\w+)\s*:') {
+                    $settingName = $Matches[1]
+                    $hasAnySettings = $true
+                    
+                    # Check if this setting is in our restricted list
+                    if ($settingName -notin $AllSettings) {
+                        $hasOnlyRestrictedSettings = $false
                         break
                     }
                 }
@@ -156,58 +210,103 @@ foreach ($file in $YamlFiles) {
             }
             
             # If securityContext only has restricted settings, comment it out
-            if (-not $hasAllowedSettings) {
-                $content[$i] = $line -replace '(\s*)(securityContext:)', '$1# $2 # OpenShift will handle this automatically'
+            if ($hasAnySettings -and $hasOnlyRestrictedSettings) {
+                if (-not $WhatIf) {
+                    $content[$i] = $line -replace '(\s*)(securityContext:)', '$1# $2 # OpenShift will handle this automatically'
+                }
                 $modified = $true
-                Write-Host "  ↳ Commented out restricted securityContext on line $($i+1)" -ForegroundColor Gray
+                $fileChanges++
+                $TotalChanges++
+                
+                if ($Verbose -or $WhatIf) {
+                    Write-Detail "  ↳ Line $($i+1): Complete securityContext block"
+                }
             }
         }
     }
     
-    # Write back if modified
+    # Write back if modified (skip in WhatIf mode)
     if ($modified) {
-        $content | Set-Content $file.FullName -Encoding UTF8
-        Write-Host "  ✅ Updated $relativePath" -ForegroundColor Green
-    } else {
-        Write-Host "  ℹ️  No changes needed for $relativePath" -ForegroundColor Blue
+        if (-not $WhatIf) {
+            $content | Set-Content $file.FullName -Encoding UTF8
+        }
+        $TotalModified++
+        
+        if ($WhatIf) {
+            Write-Warning "  📝 Would modify: $relativePath ($fileChanges changes)"
+        } elseif ($Verbose) {
+            Write-Success "  ✅ Updated: $relativePath ($fileChanges changes)"
+        }
+    } elseif ($Verbose) {
+        Write-Detail "  ℹ️  No changes needed: $relativePath"
+    }
+}
+
+# Summary
+Write-Host ""
+Write-Host "===============================================" -ForegroundColor Magenta
+Write-Host "  SUMMARY" -ForegroundColor Magenta  
+Write-Host "===============================================" -ForegroundColor Magenta
+
+if ($WhatIf) {
+    Write-Info "🔍 WHAT-IF RESULTS:"
+    Write-Info "   📁 Files that would be modified: $TotalModified"
+    Write-Info "   🔧 Total changes that would be made: $TotalChanges"
+} else {
+    Write-Success "🎉 OpenShift security fixes completed successfully!"
+    Write-Success "   📁 Files modified: $TotalModified"
+    Write-Success "   🔧 Total changes made: $TotalChanges"
+    
+    if ($TotalModified -gt 0) {
+        Write-Warning "   💾 Backup created at: $BackupPath"
     }
 }
 
 Write-Host ""
-Write-Host "🎉 COMPLETE OpenShift security fixes applied!" -ForegroundColor Green
-Write-Host ""
-Write-Host "📋 All OpenShift-problematic settings removed/commented:" -ForegroundColor Cyan
+Write-Info "📋 Security context settings addressed:"
 
-# Display categorized settings
-Write-Host "  👤 User/Group Identity (OpenShift assigns automatically):" -ForegroundColor Yellow
-Write-Host "     runAsUser, runAsGroup, uid, gid, fsGroup, supplementalGroups" -ForegroundColor White
-
-Write-Host "  🔒 Privilege Settings (Restricted by default SCC):" -ForegroundColor Yellow  
-Write-Host "     privileged, allowPrivilegeEscalation" -ForegroundColor White
-
-Write-Host "  🛡️  Security Labels (OpenShift manages):" -ForegroundColor Yellow
-Write-Host "     seLinuxOptions, appArmorProfile, seccompProfile" -ForegroundColor White
-
-Write-Host "  💾 Filesystem Settings (Can cause permission issues):" -ForegroundColor Yellow
-Write-Host "     readOnlyRootFilesystem, fsGroupChangePolicy" -ForegroundColor White
-
-Write-Host "  🔧 Capabilities (Dropped by default SCC):" -ForegroundColor Yellow
-Write-Host "     capabilities, addCapabilities, dropCapabilities" -ForegroundColor White
-
-Write-Host "  🖥️  Host Access (Not allowed in restricted SCC):" -ForegroundColor Yellow
-Write-Host "     hostNetwork, hostPID, hostIPC, hostPorts" -ForegroundColor White
+# Display what was handled by category
+foreach ($category in $SecurityContextSettings.Keys) {
+    $categoryName = $category -replace '_', ' '
+    Write-Warning "  🔹 $categoryName"
+    $settings = $SecurityContextSettings[$category] -join ', '
+    Write-Detail "     $settings"
+}
 
 Write-Host ""
-Write-Host "💾 Backup created at: $BackupPath" -ForegroundColor Yellow
+Write-Info "🚀 Next steps:"
+Write-Host "1. Navigate to chart directory:" -ForegroundColor White
+Write-Host "   cd `"H:\oc\snorkelflow`"" -ForegroundColor Gray
+
+Write-Host "2. Uninstall existing deployment:" -ForegroundColor White  
+Write-Host "   helm uninstall snorkelflow -n snorkelflow" -ForegroundColor Gray
+
+Write-Host "3. Test template generation:" -ForegroundColor White
+Write-Host "   helm template snorkelflow . | findstr /i `"runAsUser fsGroup privileged`"" -ForegroundColor Gray
+
+Write-Host "4. Deploy with fixes:" -ForegroundColor White
+Write-Host "   helm install snorkelflow . -n snorkelflow --create-namespace" -ForegroundColor Gray
+
 Write-Host ""
-Write-Host "🚀 Next steps:" -ForegroundColor Magenta
-Write-Host "1. Navigate to chart: cd H:\oc\snorkelflow" -ForegroundColor White
-Write-Host "2. Uninstall existing: helm uninstall snorkelflow -n snorkelflow" -ForegroundColor White
-Write-Host "3. Test template: helm template snorkelflow . | findstr /i ""runAsUser fsGroup privileged""" -ForegroundColor White
-Write-Host "4. Reinstall: helm install snorkelflow . -n snorkelflow --create-namespace" -ForegroundColor White
+Write-Info "🔍 Verification commands:"
+Write-Host 'helm template snorkelflow . | Select-String -Pattern "runAsUser|fsGroup|privileged" | Where-Object { $_.Line -notmatch "^\s*#" }' -ForegroundColor Gray
+Write-Host "(Should return no uncommented security context settings)" -ForegroundColor DarkGray
+
 Write-Host ""
-Write-Host "🔍 Verify all fixes:" -ForegroundColor Cyan
-Write-Host 'helm template snorkelflow . | Select-String -Pattern "runAsUser|fsGroup|privileged|capabilities" | Where-Object { $_.Line -notmatch "^\s*#" }' -ForegroundColor White
-Write-Host "   (Should return no uncommented security context settings)" -ForegroundColor Gray
+if (-not $WhatIf -and $TotalModified -gt 0) {
+    Write-Success "✅ Your Snorkel Flow chart is now OpenShift compatible!"
+} elseif ($WhatIf) {
+    Write-Info "ℹ️  Run without -WhatIf to apply these changes"
+} else {
+    Write-Success "✅ No security context issues found - chart is already OpenShift compatible!"
+}
+
 Write-Host ""
-Write-Host "✅ Your Snorkel Flow deployment should now be fully OpenShift compatible!" -ForegroundColor Green
+
+# Optional: Show rollback instructions if changes were made
+if (-not $WhatIf -and $TotalModified -gt 0) {
+    Write-Host "🔄 To rollback changes if needed:" -ForegroundColor DarkYellow
+    Write-Host "   Remove-Item `"$TemplatesPath`" -Recurse -Force" -ForegroundColor DarkGray
+    Write-Host "   Move-Item `"$BackupPath`" `"$TemplatesPath`"" -ForegroundColor DarkGray
+    Write-Host ""
+}
