@@ -1,0 +1,63 @@
+{{- $images := .Files.Get "images.json" | fromJson }}
+apiVersion: v1
+data:
+  grafana_datasource.yaml: |
+    apiVersion: 1
+    datasources:
+    - access: proxy
+      isDefault: true
+      jsonData:
+{{- if .Values.services.grafana.secretsFromFile }}
+        defaultBucket: $__file{/etc/secrets/influxdb-secret/influxdb_bucket}
+        organization: $__file{/etc/secrets/influxdb-secret/influxdb_bucket}
+{{- else }}
+        defaultBucket: $INFLUXDB_BUCKET
+        organization: $INFLUXDB_BUCKET
+{{- end }}
+        tlsSkipVerify: true
+        version: Flux
+      name: influxdb
+      secureJsonData:
+{{- if .Values.services.grafana.secretsFromFile }}
+        token: $__file{/etc/secrets/influxdb-secret/influxdb_access_key}
+{{- else }}
+        token: $INFLUXDB_ACCESS_KEY
+{{- end }}
+      type: influxdb
+      url: $INFLUXDB_V2_URL
+{{- if ne .Values.observability.logging_stack "LEGACY" }}
+    - name: clickhouse
+      type: grafana-clickhouse-datasource
+      jsonData:
+        host: clickhouse
+        port: 9000
+        protocol: native
+        username: $__file{/etc/secrets/clickhouse/clickhouse-readonly-username}
+        logs:
+          defaultDatabase: logs
+          defaultTable: snorkelflow
+          otelEnabled: false
+          timeColumn: timestamp
+          levelColumn: level
+          messageColumn: log
+      secureJsonData:
+        password: $__file{/etc/secrets/clickhouse/clickhouse-readonly-password}
+{{- if .Values.observability.exporters.prometheus.enabled }}
+    - name: prometheus
+      type: prometheus
+      url: http://prometheus:9090
+      access: proxy
+      basicAuth: true
+      basicAuthUser: $__file{/etc/secrets/prometheus/prometheus-username}
+      jsonData:
+        httpMethod: POST
+        prometheusType: Prometheus
+        prometheusVersion: {{ get $images.custom_images "prometheus" | mustRegexFind "[0-9]+\\.[0-9]+\\.[0-9]+(\\-(alpha|beta|rc)\\.[0-9]+)?" }}
+      secureJsonData:
+        basicAuthPassword: $__file{/etc/secrets/prometheus/prometheus-password}
+{{- end }}
+{{- end }}
+kind: ConfigMap
+metadata:
+  name: grafana-datasource
+  namespace: {{ .Values.projectName }}

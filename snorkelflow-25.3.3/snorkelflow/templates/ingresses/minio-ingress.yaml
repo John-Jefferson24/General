@@ -1,0 +1,38 @@
+{{- if and .Values.traffic.ingresses.services.minio.enabled (not .Values.traffic.istio.enabled) .Values.services.minio.ui.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Values.projectName }}-minio-ingress
+  namespace: {{ .Values.projectName }}
+{{- if or .Values.traffic.ingresses.annotations .Values.traffic.ingresses.services.minio.annotations }}
+  annotations:
+{{ toYaml (merge .Values.traffic.ingresses.services.minio.annotations .Values.traffic.ingresses.annotations) | indent 4 }}
+{{- end }}
+spec:
+{{- if .Values.traffic.ingresses.ingressClassName }}
+  ingressClassName: {{ .Values.traffic.ingresses.ingressClassName }}
+{{- end }}
+{{- if .Values.traffic.ingresses.tlsHosts.enabled }}
+  tls:
+  - hosts:
+    - {{ .Values.traffic.ingresses.services.minio.urlPrefix }}.{{ .Values.traffic.ingresses.domain }}
+  {{- if .Values.traffic.ingresses.tlsHosts.tlsSecretName }}
+    secretName: {{ .Values.traffic.ingresses.tlsHosts.tlsSecretName }}
+  {{- end }}
+{{- end }}
+  rules:
+    {{- if .Values.traffic.ingresses.domain }}
+    - host: {{ .Values.traffic.ingresses.services.minio.urlPrefix }}.{{ .Values.traffic.ingresses.domain }}
+      http:
+    {{- else }}
+    - http:
+    {{- end}}
+        paths:
+          - backend:
+              service:
+                name: minio
+                port:
+                  number: 9000
+            path: /
+            pathType: Prefix
+  {{- end }}

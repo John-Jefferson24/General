@@ -1,0 +1,17 @@
+{{- if and (ne .Values.observability.logging_stack "LEGACY") (.Values.volumes.clickhouse.persistentVolume.enabled) }}
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: {{ .Values.projectName }}-clickhouse-pv
+spec:
+  accessModes:
+  - ReadWriteOnce
+  capacity:
+    storage: {{ .Values.volumes.clickhouse.storageRequest }}
+{{- if .Values.volumes.clickhouse.persistentVolume.driver }}
+{{ toYaml .Values.volumes.clickhouse.persistentVolume.driver | indent 2 }}
+{{- end }}
+  storageClassName: {{ .Values.volumes.clickhouse.storageClass }}
+  persistentVolumeReclaimPolicy: Retain
+  volumeMode: Filesystem
+{{- end }}

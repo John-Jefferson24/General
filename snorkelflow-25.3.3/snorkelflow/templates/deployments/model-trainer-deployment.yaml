@@ -1,0 +1,343 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    always-pinned: "0"
+    service: model-trainer
+    project: {{ .Values.projectName }}
+    {{- if .Values.gpu.enabled }}
+    snorkel.ai/compute-type: gpu
+    {{- else }}
+    snorkel.ai/compute-type: cpu
+    {{- end }}
+{{- if or .Values.services.modelTrainer.labels .Values.services.labels }}
+{{ toYaml (merge .Values.services.modelTrainer.labels .Values.services.labels) | indent 4 }}
+{{- end }}
+  name: model-trainer
+  namespace: {{ .Values.projectName }}
+spec:
+  strategy:
+    type: Recreate
+{{- if eq .Values.autoscaling.worker_autoscaling "1" }}
+  replicas: {{ .Values.services.modelTrainer.min_replicas }}
+{{- else }}
+  replicas: {{ .Values.services.modelTrainer.max_replicas }}
+{{- end }}
+{{- if .Values.services.progressDeadlineSeconds }}
+  progressDeadlineSeconds: {{ .Values.services.progressDeadlineSeconds }}
+{{- end }}
+  selector:
+    matchLabels:
+      service: model-trainer
+      project: {{ .Values.projectName }}
+  template:
+    metadata:
+      labels:
+        always-pinned: "0"
+        service: model-trainer
+        project: {{ .Values.projectName }}
+        {{- if .Values.gpu.enabled }}
+        snorkel.ai/compute-type: gpu
+        {{- else }}
+        snorkel.ai/compute-type: cpu
+        {{- end }}
+{{- if or .Values.services.modelTrainer.labels .Values.services.labels }}
+{{ toYaml (merge .Values.services.modelTrainer.labels .Values.services.labels) | indent 8 }}
+{{- end }}
+    spec:
+{{- if or .Values.affinity.binPackAlwaysPinnedPods .Values.affinity.nodeAffinity }}
+      affinity:
+        {{- if .Values.affinity.binPackAlwaysPinnedPods }}
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: always-pinned
+                operator: In
+                values:
+                - "1"
+            topologyKey: kubernetes.io/hostname
+            namespaceSelector: {}
+          {{- if eq .Values.autoscaling.worker_autoscaling "0" }}
+        podAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: service
+                  operator: In
+                  values:
+                  - engine
+                  - model-trainer
+                  - ray-worker
+              topologyKey: kubernetes.io/hostname
+          {{- end }}
+        {{- end }}
+        {{- if not .Values.gpu.enabled }}
+        {{- with .Values.affinity.nodeAffinity }}
+        nodeAffinity:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        {{- end }}
+{{- end }}
+      imagePullSecrets:
+        - name: {{ .Values.image.imagePullSecret | default "regcred" }}
+      securityContext:
+        runAsUser: 99
+        fsGroup: 99
+      {{- if and .Values.gpu.enabled .Values.gpu.gpu_config }}
+      {{- if .Values.gpu.gpu_config.node_selectors }}
+      nodeSelector:
+        {{- range $key, $value := .Values.gpu.gpu_config.node_selectors }}
+        {{ $key }}: "{{ $value }}"
+        {{- end }}
+      {{- end }}
+      {{- if .Values.gpu.gpu_config.schedulerName }}
+      schedulerName: {{ .Values.gpu.gpu_config.schedulerName }}
+      {{- end }}
+      {{- if .Values.gpu.gpu_config.tolerations }}
+      {{- with .Values.gpu.gpu_config.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- end }}
+{{- else }}
+  {{- if .Values.affinity.nodeSelectors }}
+    {{- with .Values.affinity.nodeSelectors }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}
+  {{- end }}
+  {{- if .Values.affinity.tolerations }}
+    {{- with .Values.affinity.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}
+  {{- end }}
+{{- end }}
+      serviceAccountName: snorkelflow-internal-k8s-rw-sa
+      containers:
+        - env:
+            - name: SERVICE_TYPE
+              value: model-trainer
+            - name: HF_HOME
+              value: "/tmp/snorkel-pretrained-models"
+            - name: IS_GPU_ENABLED
+              value: "1"
+            - name: SNORKEL_FLOW_VERSION
+              value: "{{ .Values.version }}"
+            - name: NUM_WORKERS_TINY
+              value: "0"
+            - name: NUM_WORKERS_SMALL
+              value: "0"
+            - name: NUM_WORKERS_LARGE
+              value: "0"
+            - name: NUM_WORKERS_MODEL_SMALL
+              value: "4"
+            - name: NUM_WORKERS_MODEL_LARGE
+              value: "1"
+            - name: DASK_DISTRIBUTED__ADMIN__LOG_FORMAT
+              value: "%(levelname)s %(asctime)s.%(msecs).03d %(processName)s %(threadName)s %(name)s %(filename)s:%(lineno)d %(message)s"
+            - name: DASK_DISTRIBUTED__WORKER__PROFILE__INTERVAL
+              value: "1d"
+            - name: DASK_DISTRIBUTED__WORKER__PROFILE__CYCLE
+              value: "1d"
+            - name: ENABLE_ROUTINE_ANALYZE
+              value: "False"
+            - name: DB_MINCONN
+              value: "9"
+            - name: DB_MAXCONN
+              value: "19"
+{{- if eq .Values.autoscaling.worker_autoscaling "1" }}
+            - name: POD_AUTOSCALING_ENABLED
+              value: "1"
+{{- else }}
+            - name: POD_AUTOSCALING_ENABLED
+              value: "0"
+{{- end }}
+            - name: RAY_WORKER_REPLICA_DEFAULT_COUNT
+              value: {{ .Values.services.rayWorker.max_replicas | quote }}
+            - name: RAY_GPU_WORKER_REPLICA_DEFAULT_COUNT
+              value: {{ .Values.services.rayGpuWorker.max_replicas | quote }}
+            - name: ENABLE_IPV6
+              value: "False"
+            - name: ENABLE_PRETRAINED_MODEL_DIRECTORY
+              value: {{ .Values.pretrained_models.enabled | toString | title | quote }}
+            - name: RAY_HEAD_URL
+              value: "ray://ray-head:10001"
+            - name: RAY_HEAD_REDIS_PORT
+              value: "7379"
+            - name: RAY_AIR_LOCAL_CACHE_DIR
+              value: "/tmp"
+            - name: PREDICT_ON_RAY
+              value: "0"
+            - name: LD_PRELOAD
+              value: /usr/lib/x86_64-linux-gnu/libjemalloc.so.2
+            - name: MALLOC_CONF
+              value: background_thread:true
+            - name: MALLOC_MMAP_THRESHOLD_
+              value: "16384"
+            - name: CUPY_CACHE_DIR
+              value: /var/lib/snorkel/.cupy-cache
+            - name: USE_PREFECT
+              value: {{ if .Values.prefect.enabled }}"1"{{ else }}"0"{{ end }}
+            - name: PREFECT_HOME
+              value: /tmp/prefect
+            - name: PREFECT_LOCAL_STORAGE_PATH
+              value: /tmp/prefect
+            - name: PREFECT_LOGGING_TO_API_ENABLED
+              value: "False"
+            - name: PREFECT_SQLALCHEMY_POOL_SIZE
+              value: "30"
+            - name: PREFECT_TASK_RUN_TAG_CONCURRENCY_SLOT_WAIT_SECONDS
+              value: "1"
+            - name: PREFECT_TASK_SCHEDULING_PENDING_TASK_TIMEOUT
+              value: "PT1M"
+            - name: LOGGING_STACK
+              value: {{ .Values.observability.logging_stack }}
+            - name: SNORKELFLOW_MOUNT_DIR
+              value: /data
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: REDIS_URL
+              value: redis
+            - name: MINIO_URL
+              value: http://minio:9001
+            - name: TELEGRAF_CADVISOR_URL
+              value: telegraf:8186
+            - name: TELEGRAF_URL
+              value: http://telegraf:8125
+{{- if .Values.services.modelTrainer.secretsFromFile }}
+            - name: TDM_CONN_STR_FILE
+              value: /etc/secrets/db-secret/tdm_conn_str
+            - name: MINIO_ACCESS_KEY_FILE
+              value: /etc/secrets/minio-secret/minio_access_key
+            - name: MINIO_SECRET_KEY_FILE
+              value: /etc/secrets/minio-secret/minio_secret_key
+            - name: PREFECT_API_DATABASE_CONNECTION_URL_FILE
+              value: /etc/secrets/db-prefect-secret/prefect_db_conn_url
+{{- else }}
+            - name: TDM_CONN_STR
+              valueFrom:
+                secretKeyRef:
+                  name: db-secret
+                  key: tdm_conn_str
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-secret
+                  key: minio_access_key
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-secret
+                  key: minio_secret_key
+            - name: PREFECT_API_DATABASE_CONNECTION_URL
+              valueFrom:
+                secretKeyRef:
+                  name: db-prefect-secret
+                  key: prefect_db_conn_url
+{{- end }}
+{{- range $k, $v := (merge .Values.services.modelTrainer.env .Values.services.env) }}
+            - name: {{ $k }}
+              value: {{ $v | toString | quote }}
+{{- end }}
+          {{- if .Values.image.imageNames.engine }}
+          image: {{ .Values.image.imageNames.engine }}
+          {{- else if .Values.gpu.enabled }}
+          image: {{ template "snorkelflow.registryPrefix" . }}snorkelai/engine:{{ .Values.version }}-cuda
+          {{- else }}
+          image: {{ template "snorkelflow.registryPrefix" . }}snorkelai/engine:{{ .Values.version }}
+          {{- end }}
+          {{- if .Values.image.imagePullPolicy }}
+          imagePullPolicy: {{ .Values.image.imagePullPolicy }}
+          {{- end }}
+          name: model-trainer
+          {{- if .Values.services.modelTrainer.containerSecurityContext }}
+          securityContext:
+            {{- toYaml .Values.services.modelTrainer.containerSecurityContext | nindent 12 }}
+          {{- end }}
+          args:
+            - worker
+          ports: []
+          volumeMounts:
+            - mountPath: /tmp
+              name: empty-dir
+              subPath: tmp-dir
+            - mountPath: /var/log
+              name: empty-dir
+              subPath: log-dir
+            - mountPath: /data
+              name: data
+            - mountPath: /etc/auth/jwt
+              name: jwt-key-pub
+            - mountPath: /dev/shm
+              name: dshm
+{{- if .Values.services.modelTrainer.secretsFromFile }}
+            - name: minio-secret-volume
+              mountPath: /etc/secrets/minio-secret
+              readOnly: true
+            - name: db-secret-volume
+              mountPath: /etc/secrets/db-secret
+              readOnly: true
+            - name: db-prefect-secret-volume
+              mountPath: /etc/secrets/db-prefect-secret
+              readOnly: true
+{{- end }}
+{{- with include "logging.mounts" (deepCopy . | merge (dict "service_type" "model-trainer")) }}
+{{ . | indent 12 }}
+{{- end }}
+          resources:
+{{- if .Values.services.modelTrainer.resources }}
+{{ toYaml .Values.services.modelTrainer.resources | indent 12 }}
+{{- else }}
+            requests:
+              memory: 64.0Gi
+              cpu: "16.0"
+              {{- if .Values.gpu.enabled }}
+              nvidia.com/gpu: '1'
+              {{- end }}
+            limits:
+              memory: 64.0Gi
+              cpu: "16.0"
+              {{- if .Values.gpu.enabled }}
+              nvidia.com/gpu: '1'
+              {{- end }}
+{{- end }}
+{{- with include "logging.sidecar" (deepCopy . | merge (dict "service_type" "model-trainer")) }}
+{{ . | indent 8 }}
+{{- end }}
+      volumes:
+        - name: empty-dir
+          emptyDir: {}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ template "snorkelflow.pvcName" . }}
+        - name: jwt-key-pub
+          secret:
+            secretName: jwt-key-pub
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 10000Mi
+{{- if .Values.services.modelTrainer.secretsFromFile }}
+        - name: minio-secret-volume
+          secret:
+            secretName: minio-secret
+        - name: db-secret-volume
+          secret:
+            secretName: db-secret
+        - name: db-prefect-secret-volume
+          secret:
+            secretName: db-prefect-secret
+{{- end }}
+{{- with include "logging.volumes" (deepCopy . | merge (dict "service_type" "model-trainer")) }}
+{{ . | indent 8 }}
+{{- end }}

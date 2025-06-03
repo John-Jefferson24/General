@@ -1,0 +1,340 @@
+{{- $envOverrides := merge .Values.services.studioApi.env .Values.services.env }}
+{{- $images := .Files.Get "images.json" | fromJson }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    always-pinned: "0"
+    project: {{ .Values.projectName }}
+    service: studio-api
+    snorkel.ai/compute-type: cpu
+{{- if or .Values.services.studioApi.labels .Values.services.labels }}
+{{ toYaml (merge .Values.services.studioApi.labels .Values.services.labels) | indent 4 }}
+{{- end }}
+  name: studio-api
+  namespace: {{ .Values.projectName }}
+spec:
+  replicas: 1
+{{- if .Values.services.progressDeadlineSeconds }}
+  progressDeadlineSeconds: {{ .Values.services.progressDeadlineSeconds }}
+{{- end }}
+  selector:
+    matchLabels:
+      project: {{ .Values.projectName }}
+      service: studio-api
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        always-pinned: "0"
+        project: {{ .Values.projectName }}
+        service: studio-api
+        snorkel.ai/compute-type: cpu
+{{- if or .Values.services.studioApi.labels .Values.services.labels}}
+{{ toYaml (merge .Values.services.studioApi.labels .Values.services.labels) | indent 8 }}
+{{- end }}
+    spec:
+{{- if or .Values.affinity.binPackAlwaysPinnedPods .Values.affinity.nodeAffinity }}
+      affinity:
+        {{- if .Values.affinity.binPackAlwaysPinnedPods }}
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: always-pinned
+                operator: In
+                values:
+                - "1"
+            topologyKey: kubernetes.io/hostname
+            namespaceSelector: {}
+        {{- end }}
+        {{- with .Values.affinity.nodeAffinity }}
+        nodeAffinity:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+{{- end }}
+      {{- with .Values.affinity.nodeSelectors }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+      - args:
+        - api
+        - --port
+        - '8484'
+        - --host
+        - 0.0.0.0
+        env:
+        - name: SERVICE_TYPE
+          value: studio-api
+        - name: HF_HOME
+          value: "/tmp/snorkel-pretrained-models"
+        - name: IS_GPU_ENABLED
+          value: "0"
+        - name: DB_MINCONN
+          value: '49'
+        - name: DB_MAXCONN
+          value: '98'
+        - name: DDF_CACHE_WORKERS
+          value: '0'
+        - name: DDF_CACHE_THREADS
+          value: '0'
+        - name: ENABLE_IPV6
+          value: "False"
+        - name: STUDIO_GUNICORN_WORKERS
+          value: '4'
+        - name: SSO_HOST_IP
+          value: {{ .Values.traffic.ingresses.services.snorkelflow.urlPrefix }}.{{ .Values.traffic.ingresses.domain }}
+        - name: ENABLE_PRETRAINED_MODEL_DIRECTORY
+          value: {{ .Values.pretrained_models.enabled | toString | title | quote }}
+{{- if .Values.authentication.jwt.enabled }}
+        - name: SSO_ENABLE_JWT_LOGIN
+          value: "{{ .Values.authentication.jwt.enabled }}"
+{{- else }}
+        - name: SSO_ENABLE_JWT_LOGIN
+          value: "False"
+{{- end }}
+{{- if and .Values.authentication.jwt.enabled .Values.authentication.jwt.deployment }}
+        - name: SNORKEL_IP_DEPLOYMENT
+          value: "{{ .Values.authentication.jwt.deployment }}"
+{{- end }}
+        - name: ARROW_CACHE_ENABLED
+          value: {{ if .Values.optimizations.arrow_cache.enabled }}"1"{{ else }}"0"{{ end }}
+        - name: STUDIO_RAY_ENABLED
+          value: '1'
+{{- if not (hasKey $envOverrides "STUDIO_RAY_WORKER_CPU_COUNT") }}
+        - name: STUDIO_RAY_WORKER_CPU_COUNT
+          value: '8'
+{{- end }}
+{{- if not (hasKey $envOverrides "STUDIO_RAY_WORKER_MEMORY_GB") }}
+        - name: STUDIO_RAY_WORKER_MEMORY_GB
+          value: '32'
+{{- end }}
+{{- if not (hasKey $envOverrides "STUDIO_RAY_INTERACTIVE_SHARED_CPU_COUNT") }}
+        - name: STUDIO_RAY_INTERACTIVE_SHARED_CPU_COUNT
+          value: '4'
+{{- end }}
+{{- if not (hasKey $envOverrides "STUDIO_RAY_INTERACTIVE_SHARED_MEMORY_GB") }}
+        - name: STUDIO_RAY_INTERACTIVE_SHARED_MEMORY_GB
+          value: '16'
+{{- end }}
+        - name: STUDIO_RAY_HEAD_REDIS_PORT
+          value: '7380'
+        - name: LD_PRELOAD
+          value: /usr/lib/x86_64-linux-gnu/libjemalloc.so.2
+        - name: MALLOC_CONF
+          value: background_thread:true
+        - name: MALLOC_MMAP_THRESHOLD_
+          value: '16384'
+        - name: CUPY_CACHE_DIR
+          value: /var/lib/snorkel/.cupy-cache
+        - name: USE_PREFECT
+          value: {{ if .Values.prefect.enabled }}"1"{{ else }}"0"{{ end }}
+        - name: PREFECT_HOME
+          value: /tmp/prefect
+        - name: PREFECT_LOCAL_STORAGE_PATH
+          value: /tmp/prefect
+        - name: PREFECT_LOGGING_TO_API_ENABLED
+          value: "False"
+        - name: PREFECT_SQLALCHEMY_POOL_SIZE
+          value: "30"
+        - name: PREFECT_TASK_RUN_TAG_CONCURRENCY_SLOT_WAIT_SECONDS
+          value: "1"
+        - name: PREFECT_TASK_SCHEDULING_PENDING_TASK_TIMEOUT
+          value: "PT1M"
+        - name: LOGGING_STACK
+          value: {{ .Values.observability.logging_stack }}
+        - name: SNORKELFLOW_MOUNT_DIR
+          value: /data
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: TDM_API_URL
+          value: http://tdm-api:8686
+{{- if .Values.services.studioApi.secretsFromFile }}
+        - name: TDM_CONN_STR_FILE
+          value: /etc/secrets/db-secret/tdm_conn_str
+{{- else }}
+        - name: TDM_CONN_STR
+          valueFrom:
+            secretKeyRef:
+              key: tdm_conn_str
+              name: db-secret
+{{- end }}
+        - name: AUTHORIZATION_API_URL
+          value: http://authorization-api:31314
+        - name: REDIS_URL
+          value: redis
+        - name: MINIO_URL
+          value: http://minio:9001
+        - name: TELEGRAF_CADVISOR_URL
+          value: telegraf:8186
+        - name: TELEGRAF_URL
+          value: http://telegraf:8125
+        - name: STUDIO_RAY_HEAD_URL
+          value: ray://studio-ray-head:10002
+{{- if .Values.services.studioApi.secretsFromFile }}
+        - name: MINIO_ACCESS_KEY_FILE
+          value: /etc/secrets/minio-secret/minio_access_key
+        - name: MINIO_SECRET_KEY_FILE
+          value: /etc/secrets/minio-secret/minio_secret_key
+        {{- if .Values.influx_cloud_key }}
+        - name: INFLUXDB_CLOUD_TOKEN_G498_FILE
+          value: /etc/secrets/influxdb-cloud-secret/influxdb_cloud_token
+        {{- end }}
+        - name: PREFECT_API_DATABASE_CONNECTION_URL_FILE
+          value: /etc/secrets/db-prefect-secret/prefect_db_conn_url
+{{- else }}
+        - name: MINIO_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              key: minio_access_key
+              name: minio-secret
+        - name: MINIO_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              key: minio_secret_key
+              name: minio-secret
+        {{- if .Values.influx_cloud_key }}
+        - name: INFLUXDB_CLOUD_TOKEN_G498
+          valueFrom:
+            secretKeyRef:
+              name: influxdb-cloud-secret
+              key: influxdb_cloud_token
+        {{- end }}
+        - name: PREFECT_API_DATABASE_CONNECTION_URL
+          valueFrom:
+            secretKeyRef:
+              name: db-prefect-secret
+              key: prefect_db_conn_url
+{{- end }}
+{{- with include "launchDarkly.envVars" . }}
+{{ . | indent 8 }}
+{{- end }}
+{{- range $k, $v := $envOverrides }}
+        - name: {{ $k }}
+          value: {{ $v | toString | quote }}
+{{- end }}
+{{- if .Values.image.imageNames.studio }}
+        image: {{ .Values.image.imageNames.studio }}
+{{- else if .Values.gpu.enabled }}
+        image: {{ template "snorkelflow.registryPrefix" . }}snorkelai/studio-api:{{ .Values.version }}-cuda
+{{- else }}
+        image: {{ template "snorkelflow.registryPrefix" . }}snorkelai/studio-api:{{ .Values.version }}
+{{- end }}
+{{- if .Values.image.imagePullPolicy }}
+        imagePullPolicy: {{ .Values.image.imagePullPolicy }}
+{{- end }}
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 8484
+          periodSeconds: 30
+        name: studio-api
+        {{- if .Values.services.studioApi.containerSecurityContext }}
+        securityContext:
+          {{- toYaml .Values.services.studioApi.containerSecurityContext | nindent 10 }}
+        {{- end }}
+        ports:
+        - containerPort: 8484
+        - containerPort: 12500
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 8484
+          initialDelaySeconds: 3
+          periodSeconds: 30
+        startupProbe:
+          httpGet:
+            path: /
+            port: 8484
+          periodSeconds: 30
+          failureThreshold: 120
+        resources:
+{{- if .Values.services.studioApi.resources }}
+{{ toYaml .Values.services.studioApi.resources | indent 10 }}
+{{- else }}
+          limits:
+            cpu: '8.0'
+            memory: 32.0Gi
+          requests:
+            cpu: '8.0'
+            memory: 32.0Gi
+{{- end }}
+        volumeMounts:
+        - mountPath: /tmp
+          name: empty-dir
+          subPath: tmp-dir
+        - mountPath: /var/log
+          name: empty-dir
+          subPath: log-dir
+        - mountPath: /data
+          name: data
+        - mountPath: /etc/auth/jwt
+          name: jwt-key-pub
+{{- if .Values.services.studioApi.secretsFromFile }}
+        - name: minio-secret-volume
+          mountPath: /etc/secrets/minio-secret
+          readOnly: true
+        - mountPath: /etc/secrets/db-secret
+          name: db-secret-volume
+          readOnly: true
+        {{- if .Values.influx_cloud_key}}
+        - name: influxdb-cloud-secret-volume
+          mountPath: /etc/secrets/influxdb-cloud-secret
+          readOnly: true
+        {{- end }}
+        - mountPath: /etc/secrets/db-prefect-secret
+          name: db-prefect-secret-volume
+          readOnly: true
+{{- end }}
+{{- with include "logging.mounts" (deepCopy . | merge (dict "service_type" "studio-api")) }}
+{{ . | indent 8 }}
+{{- end }}
+{{- with include "logging.sidecar" (deepCopy . | merge (dict "service_type" "studio-api")) }}
+{{ . | indent 6 }}
+{{- end }}
+      imagePullSecrets:
+      - name: {{ .Values.image.imagePullSecret | default "regcred" }}
+      securityContext:
+        fsGroup: 99
+        runAsUser: 99
+      serviceAccountName: snorkelflow-sa
+      volumes:
+      - name: empty-dir
+        emptyDir: {}
+      - name: data
+        persistentVolumeClaim:
+          claimName: {{ template "snorkelflow.pvcName" . }}
+      - name: jwt-key-pub
+        secret:
+          secretName: jwt-key-pub
+{{- if .Values.services.studioApi.secretsFromFile }}
+      - name: minio-secret-volume
+        secret:
+          secretName: minio-secret
+      - name: db-secret-volume
+        secret:
+          secretName: db-secret
+      {{- if .Values.influx_cloud_key}}
+      - name: influxdb-cloud-secret-volume
+        secret:
+          secretName: influxdb-cloud-secret
+      {{- end }}
+      - name: db-prefect-secret-volume
+        secret:
+          secretName: db-prefect-secret
+{{- end }}
+{{- with include "logging.volumes" (deepCopy . | merge (dict "service_type" "studio-api")) }}
+{{ . | indent 6 }}
+{{- end }}

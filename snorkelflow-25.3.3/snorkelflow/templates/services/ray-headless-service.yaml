@@ -1,0 +1,48 @@
+{{- if and .Values.traffic.istio.enabled ((.Values.traffic.istio).mtls).enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    project: {{ .Values.projectName }}
+    snorkel.ai/ray-cluster-name: ray-cluster
+  name: ray-headless-service
+  namespace: {{ .Values.projectName }}
+spec:
+  clusterIP: None
+  selector:
+    snorkel.ai/ray-cluster-name: ray-cluster
+  publishNotReadyAddresses: true
+  ports:
+  - name: node-manager-port
+    port: 6380
+    appProtocol: grpc
+  - name: object-manager-port
+    port: 6381
+    appProtocol: grpc
+  - name: runtime-env-agent-port
+    port: 6382
+    appProtocol: grpc
+  - name: dashboard-agent-grpc-port
+    port: 6383
+    appProtocol: grpc
+  - name: dashboard-agent-listen-port
+    port: 52365
+    appProtocol: http
+  - name: metrics-export-port
+    port: 8080
+    appProtocol: http
+{{- range untilStep 10002 10103 1 }}
+{{- /*
+  # This loop range supposes ray-cluster head and worker pods use the default values with --min-worker-port and --max-worker-port.
+  # If a user changes these values, the user should update the service accordingly.
+  #
+  # These are the ports ray workers use to communicate with the head node. Istio expects developers to define
+  # all hostnames and ports in the k8s services to configure routes in the sidecar proxies. For details, see the following links:
+  # * https://istio.io/latest/docs/concepts/traffic-management/#introducing-istio-traffic-management
+  # * https://docs.ray.io/en/latest/cluster/kubernetes/k8s-ecosystem/istio.html
+*/}}
+  - name: p{{ . }}
+    port: {{ . }}
+    appProtocol: grpc
+{{- end }}
+{{- end }}

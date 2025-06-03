@@ -1,0 +1,13 @@
+{{- $autoscaling := eq .Values.autoscaling.worker_autoscaling "1" -}}
+apiVersion: v1
+data:
+{{- range $path, $_ := .Files.Glob "grafana/dashboards/*.json" }}
+{{- if or (ne (base $path) "autoscaling_dashboard.json") $autoscaling }}
+  {{ base $path }}: |
+{{ $.Files.Get $path | indent 4 }}
+{{- end }}
+{{- end }}
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-json
+  namespace: {{ .Values.projectName }}

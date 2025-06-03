@@ -1,0 +1,73 @@
+{{- if .Values.traffic.networkPolicies.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: grafana-network-policy
+  namespace: {{ .Values.projectName }}
+spec:
+  egress:
+  - ports:
+    - port: 53
+      protocol: UDP
+    - port: 53
+      protocol: TCP
+    to: []
+{{- if .Values.traffic.allowInternetAccess}}
+  - to:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+        except:
+        - 192.168.0.0/16
+        - 172.16.0.0/20
+{{- end }}
+{{- if ne .Values.observability.logging_stack "LEGACY" }}
+  - ports:
+    - port: 9000
+    to:
+    - podSelector:
+        matchLabels:
+          project: {{ .Values.projectName }}
+          service: clickhouse
+{{- if .Values.observability.exporters.prometheus.enabled }}
+  - ports:
+    - port: 9090
+    to:
+    - podSelector:
+        matchLabels:
+          project: {{ .Values.projectName }}
+          service: prometheus
+{{- end }}
+{{- end }}
+  - ports:
+    - port: 8086
+    to:
+    - podSelector:
+        matchLabels:
+          project: {{ .Values.projectName }}
+          service: influxdb
+  - ports:
+    - port: 8186
+    to:
+    - podSelector:
+        matchLabels:
+          project: {{ .Values.projectName }}
+          service: telegraf
+  ingress:
+  - from: []
+    ports:
+    - port: 3000
+  - from:
+    - podSelector:
+        matchLabels:
+          project: {{ .Values.projectName }}
+          service: envoy-front-proxy
+    ports:
+    - port: 3000
+  podSelector:
+    matchLabels:
+      project: {{ .Values.projectName }}
+      service: grafana
+  policyTypes:
+  - Ingress
+  - Egress
+{{- end }}

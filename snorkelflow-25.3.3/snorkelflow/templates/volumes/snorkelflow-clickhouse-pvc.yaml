@@ -1,0 +1,25 @@
+{{- if ne .Values.observability.logging_stack "LEGACY" }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Values.projectName }}-clickhouse
+  namespace: {{ .Values.projectName }}
+{{- if .Values.volumes.clickhouse.storageClass }}
+  annotations:
+    volume.beta.kubernetes.io/storage-class: "{{ .Values.volumes.clickhouse.storageClass }}"
+{{- end }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.volumes.clickhouse.storageRequest }}
+{{- if .Values.volumes.clickhouse.storageClass }}
+  storageClassName: {{ .Values.volumes.clickhouse.storageClass }}
+{{- end }}
+{{- if .Values.volumes.clickhouse.persistentVolume.enabled }}
+  volumeName: {{ .Values.projectName }}-clickhouse-pv
+{{- else if .Values.volumes.clickhouse.volumeName }}
+  volumeName: {{ .Values.volumes.clickhouse.volumeName }}
+{{- end }}
+{{- end }}

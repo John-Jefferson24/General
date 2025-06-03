@@ -1,0 +1,19 @@
+{{- if and (ne .Values.observability.logging_stack "LEGACY") .Values.observability.exporters.prometheus.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    project: {{ .Values.projectName }}
+    service: prometheus
+  name: prometheus
+  namespace: {{ .Values.projectName }}
+spec:
+  ports:
+  - name: prometheus
+    port: 9090
+    protocol: TCP
+  selector:
+    service: prometheus
+    project: {{ .Values.projectName }}
+  type: ClusterIP
+{{- end }}

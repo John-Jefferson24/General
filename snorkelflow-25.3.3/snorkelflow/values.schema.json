@@ -1,0 +1,940 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "$defs": {
+    "imageName": {
+      "type": "string",
+      "minLength": 1
+    },
+    "ingress": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "urlPrefix": {
+          "type": "string",
+          "minLength": 1
+        },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "service": {
+      "type": "object",
+      "properties": {
+        "resources": {
+          "type": "object"
+        },
+        "env": {
+          "type": "object"
+        },
+        "labels": {
+          "type": "object"
+        },
+        "containerSecurityContext": {
+          "type": ["object", "null"]
+        }
+      }
+    },
+    "secretsFromFile": {
+      "type": "object",
+      "properties": {
+        "secretsFromFile": {
+          "type": "boolean"
+        }
+      }
+    },
+    "replicas": {
+      "type": "object",
+      "properties": {
+        "min_replicas": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_replicas": {
+          "type": "integer"
+        }
+      }
+    },
+    "volume": {
+      "type": "object",
+      "properties": {
+        "storageClass": {
+          "type": "string"
+        },
+        "storageRequest": {
+          "type": "string"
+        },
+        "persistentVolume": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "driver": {
+              "type": "object"
+            }
+          }
+        },
+        "volumeName": {
+          "type": "string"
+         }
+      }
+    }
+  },
+  "properties": {
+    "projectName": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "image": {
+      "type": "object",
+      "properties": {
+        "registry": {
+          "type": "string"
+        },
+        "imagePullSecret": {
+          "type": "string"
+        },
+        "imagePullPolicy": {
+          "type": "string"
+        },
+        "imageNames": {
+          "type": "object",
+          "properties": {
+            "clickhouse": { "$ref": "#/$defs/imageName" },
+            "postgres": { "$ref": "#/$defs/imageName" },
+            "engine": { "$ref": "#/$defs/imageName" },
+            "envoy": { "$ref": "#/$defs/imageName" },
+            "flowUi": { "$ref": "#/$defs/imageName" },
+            "grafana": { "$ref": "#/$defs/imageName" },
+            "influxdb": { "$ref": "#/$defs/imageName" },
+            "jupyterhub": { "$ref": "#/$defs/imageName" },
+            "jupyterhubProxy": { "$ref": "#/$defs/imageName" },
+            "minio": { "$ref": "#/$defs/imageName" },
+            "notebook": { "$ref": "#/$defs/imageName" },
+            "redis": { "$ref": "#/$defs/imageName" },
+            "secretsGenerator": { "$ref": "#/$defs/imageName" },
+            "singleuserNotebook": { "$ref": "#/$defs/imageName" },
+            "studio": { "$ref": "#/$defs/imageName" },
+            "telegraf": { "$ref": "#/$defs/imageName" },
+            "tdm": { "$ref": "#/$defs/imageName" },
+            "authorization": { "$ref": "#/$defs/imageName" },
+            "pretrainedModelImage": { "$ref": "#/$defs/imageName" },
+            "storage": { "$ref": "#/$defs/imageName" },
+            "prometheus": { "$ref": "#/$defs/imageName" },
+            "vector": { "$ref": "#/$defs/imageName" }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "pagerduty_key": {
+      "type": ["string", "null"]
+    },
+    "influx_cloud_key": {
+      "type": ["string", "null"]
+    },
+    "affinity": {
+      "type": "object",
+      "properties": {
+        "binPackAlwaysPinnedPods": {
+          "type": "boolean"
+        },
+        "nodeSelectors": {
+          "type": ["object", "null"]
+        },
+        "tolerations": {
+          "type": ["array", "null"],
+          "items": {
+            "type": "object"
+          }
+        },
+        "nodeAffinity": {
+          "type": ["object", "null"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "autoscaling": {
+      "type": "object",
+      "properties": {
+        "worker_autoscaling": {
+          "type": "string",
+          "enum": ["0", "1"]
+        },
+        "cluster_autoscaling": {
+          "type": "object",
+          "properties": {
+            "pod_disruption_budget_toggling": {
+              "type": "string",
+              "enum": ["0", "1"]
+            },
+            "business_hour_start_utc": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 23            
+            },
+            "business_hour_end_utc": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 23
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "traffic": {
+      "type": "object",
+      "properties": {
+        "basePath": {
+          "type": "string",
+          "minLength": 1
+        },
+        "istio": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "mtls": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "gateway": {
+              "type": "object",
+              "properties": {
+                "create": {
+                  "type": "boolean"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "namespace": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "ingresses": {
+          "type": "object",
+          "properties": {
+            "domain": {
+              "type": "string"
+            },
+            "ingressClassName": {
+              "type": ["string", "null"]
+            },
+            "serviceType": {
+              "type": "string",
+              "enum": ["ClusterIP", "NodePort", "LoadBalancer"],
+              "minLength": 1
+            },
+            "cloudProvider": {
+              "type": ["string", "null"],
+              "enum": ["gcp", "aws", "azure"]
+            },
+            "tlsHosts": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "tlsSecretName": {
+                  "type": ["string", "null"]
+                }
+              },
+              "additionalProperties": false
+            },
+            "annotations": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "services": {
+              "type": "object",
+              "properties": {
+                "influxdb": { "$ref": "#/$defs/ingress" },
+                "minio": { "$ref": "#/$defs/ingress" },
+                "snorkelflow": { "$ref": "#/$defs/ingress" },
+                "studio": { "$ref": "#/$defs/ingress" },
+                "tdm": { "$ref": "#/$defs/ingress" },
+                "storage": { "$ref": "#/$defs/ingress" }
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "tls": {
+          "type": "object",
+          "properties": {
+            "key_secret_name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "cert_secret_name": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "allowAllInboundTrafficOnKeyServices": {
+          "type": "boolean",
+          "default": true
+        },
+        "allowInternetAccess": {
+          "type": "boolean",
+          "default": true
+        },
+        "networkPolicies": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "ingresses": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "gpu": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "gpu_config": {
+          "type": "object"
+        },
+        "separate_gpu_pods": {
+          "type": "boolean"
+        }
+      }, 
+      "additionalProperties": false
+    },
+    "optimizations": {
+      "type": "object",
+      "properties": {
+        "arrow_cache": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "prefect": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "namespace": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "services": {
+      "type": "object",
+      "properties": {
+        "env": {
+          "type": "object"
+        },
+        "labels": {
+          "type": "object"
+        },
+        "progressDeadlineSeconds": {
+          "type": ["integer", "null"]
+        },
+        "clickhouse": {
+          "allOf": [
+            { "$ref": "#/$defs/service" }
+          ],
+          "unevaluatedProperties": false
+         },
+        "db": {
+          "allOf": [
+            { "$ref": "#/$defs/service" },
+            { "$ref": "#/$defs/secretsFromFile" },
+            {
+              "type": "object",
+              "properties": {
+                "shared_buffers": {
+                  "type": "string",
+                  "pattern": "^\\d+GB$"
+                }
+              }
+            }
+          ],
+          "unevaluatedProperties": false
+        },
+        "engine": {
+          "allOf": [
+            { "$ref": "#/$defs/service" },
+            { "$ref": "#/$defs/secretsFromFile" },
+            { "$ref": "#/$defs/replicas" }
+          ],
+          "unevaluatedProperties": false
+        },
+        "engineTiny": { 
+          "allOf": [
+            { "$ref": "#/$defs/service" },
+            { "$ref": "#/$defs/secretsFromFile" }
+          ],
+          "unevaluatedProperties": false
+         },
+        "envoyFrontProxy": { "$ref": "#/$defs/service" },
+        "flowUi": { 
+          "allOf": [
+            { "$ref": "#/$defs/service" },
+            { "$ref": "#/$defs/secretsFromFile" }
+          ],
+          "unevaluatedProperties": false
+         },
+        "grafana": {
+          "allOf": [
+            { "$ref": "#/$defs/service" },
+            { "$ref": "#/$defs/secretsFromFile" }
+          ],
+          "unevaluatedProperties": false
+         },
+        "influxdb": { "$ref": "#/$defs/service" },
+        "jupyterhub": {
+          "allOf": [
+            { "$ref": "#/$defs/service" },
+            { "$ref": "#/$defs/secretsFromFile" },
+            {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "singleUserNotebook": {
+                  "type": "object",
+                  "properties": {
+                    "serviceAccountName": {
+                      "type": "string"
+                    },
+                    "startTimeout": {
+                      "type": "integer"
+                    },
+                    "gpu": {
+                      "type": "boolean"
+                    },
+                    "minio_user_dir_only": {
+                      "type": "boolean"
+                    },
+                    "resources": {
+                      "type": "object",
+                      "properties": {
+                        "cpu_guarantee": {
+                          "type": "number"
+                        },
+                        "cpu_limit": {
+                          "type": "number"
+                        },
+                        "memory_guarantee": {
+                          "type": "string",
+                          "pattern": "^\\d+G$"
+                        },
+                        "memory_limit": {
+                          "type": "string",
+                          "pattern": "^\\d+G$"
+                        }
+                      }
+                    },
+                    "storage": {
+                      "type": "object",
+                      "properties": {
+                        "dynamicClass": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string",
+                          "enum": ["static", "dynamic"]
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "unevaluatedProperties": false
+        },
+        "jupyterhubProxy": { 
+          "allOf": [
+            { "$ref": "#/$defs/service" },
+            { "$ref": "#/$defs/secretsFromFile" }
+          ],
+          "unevaluatedProperties": false
+         },
+        "minio": { 
+          "allOf": [
+            { "$ref": "#/$defs/service" },
+            {
+              "type": "object",
+              "properties": {
+                "auth": {
+                  "type": "object",
+                  "properties": {
+                    "username": {
+                      "type": "string"
+                    },
+                    "password": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "ui": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean",
+                      "default": true
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          ],
+          "unevaluatedProperties": false
+        },
+        "modelTrainer": { 
+          "allOf": [
+            { "$ref": "#/$defs/service" },
+            { "$ref": "#/$defs/secretsFromFile" },
+            { "$ref": "#/$defs/replicas" }
+          ],
+          "unevaluatedProperties": false
+         },
+        "notebook": { 
+          "allOf": [
+            { "$ref": "#/$defs/service" },
+            { "$ref": "#/$defs/secretsFromFile" }
+          ],
+          "unevaluatedProperties": false
+         },
+        "prometheus": {
+          "allOf": [
+            { "$ref": "#/$defs/service" }
+          ],
+          "unevaluatedProperties": false
+         },
+        "rayHead": { 
+          "allOf": [
+            { "$ref": "#/$defs/service" },
+            { "$ref": "#/$defs/secretsFromFile" }
+          ],
+          "unevaluatedProperties": false
+         },
+        "rayGpuWorker": { 
+          "allOf": [
+            { "$ref": "#/$defs/service" },
+            { "$ref": "#/$defs/secretsFromFile" },
+            { "$ref": "#/$defs/replicas" }
+          ],
+          "unevaluatedProperties": false
+        },
+        "rayWorker": { 
+          "allOf": [
+            { "$ref": "#/$defs/service" },
+            { "$ref": "#/$defs/secretsFromFile" },
+            { "$ref": "#/$defs/replicas" }
+          ],
+          "unevaluatedProperties": false
+        },
+        "redis": { "$ref": "#/$defs/service" },
+        "secretsGenerator": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        "studioApi": { 
+          "allOf": [
+            { "$ref": "#/$defs/service" },
+            { "$ref": "#/$defs/secretsFromFile" }
+          ],
+          "unevaluatedProperties": false
+         },
+        "studioRayHead": { 
+          "allOf": [
+            { "$ref": "#/$defs/service" },
+            { "$ref": "#/$defs/secretsFromFile" }
+          ],
+          "unevaluatedProperties": false
+         },
+        "studioRayWorker": {
+          "allOf": [
+            { "$ref": "#/$defs/service" },
+            { "$ref": "#/$defs/secretsFromFile" },
+            {
+              "type": "object",
+              "properties": {
+                "replicas": {
+                  "type": "integer"
+                }
+              }
+            }
+          ],
+          "unevaluatedProperties": false
+        },
+        "tdmApi": { 
+          "allOf": [
+            { "$ref": "#/$defs/service" },
+            { "$ref": "#/$defs/secretsFromFile" }
+          ],
+          "unevaluatedProperties": false
+         },
+        "telegraf": { 
+          "allOf": [
+            { "$ref": "#/$defs/service" },
+            { "$ref": "#/$defs/secretsFromFile" }
+          ],
+          "unevaluatedProperties": false
+         },
+        "authorizationApi": { 
+          "allOf": [
+            { "$ref": "#/$defs/service" },
+            { "$ref": "#/$defs/secretsFromFile" }
+          ],
+          "unevaluatedProperties": false
+        },
+        "storageApi": { 
+          "allOf": [
+            { "$ref": "#/$defs/service" },
+            { "$ref": "#/$defs/secretsFromFile" }
+          ],
+          "unevaluatedProperties": false
+         },
+         "vector": {
+          "allOf": [
+            { "$ref": "#/$defs/service" }
+          ],
+          "unevaluatedProperties": false
+         }
+      },
+      "additionalProperties": false
+    },
+    "volumes": {
+      "type": "object",
+      "properties": {
+        "snorkelflowData": {
+          "allOf": [
+            { "$ref": "#/$defs/volume" },
+            {
+              "type": "object",
+              "properties": {
+                "smb": {
+                  "type": "boolean"
+                },
+                "persistentVolumeClaimName": {
+                  "type": ["string", "null"]
+                }
+              }
+            }
+          ]
+        },
+        "clickhouse": { "$ref": "#/$defs/volume" },
+        "influxdb": { "$ref": "#/$defs/volume" },
+        "postgres": { "$ref": "#/$defs/volume" },
+        "redis": { "$ref": "#/$defs/volume" },
+        "prometheus": { "$ref": "#/$defs/volume" },
+        "jupyterhub": { "$ref": "#/$defs/volume" }
+      },
+      "additionalProperties": false
+    },
+    "authorization": {
+      "type": "object",
+      "properties": {
+        "adRoles": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "oidc": {
+              "type": "object",
+              "properties": {
+                "claim": {
+                  "type": "string"
+                },
+                "prefix": {
+                  "type": "string"
+                },
+                "separator": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            "saml": {
+              "type": "object",
+              "properties": {
+                "attributeName": {
+                  "type": "string"
+                },
+                "prefix": {
+                  "type": "string"
+                },
+                "separator": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "authentication": {
+      "type": "object",
+      "properties": {
+        "jwt": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "deployment": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "oidc": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "admissionRolesSettings": {
+              "type": "object",
+              "properties": {
+                "admissionRoles": {
+                  "type": "string"
+                },
+                "admissionRolesScope": {
+                  "type": "string"
+                },
+                "admissionRolesClaim": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            "oidcProviderSettings": {
+              "type": "object",
+              "properties": {
+                "clientId": {
+                  "type": ["string", "null"]
+                },
+                "clientSecret": {
+                  "type": ["string", "null"]
+                },
+                "redirectUris": {
+                  "type": ["array", "null"],
+                  "items": {
+                    "type": "string",
+                    "format": "uri"
+                  }
+                },
+                "issuer": {
+                  "type": ["string", "null"]
+                },
+                "authorizationEndpoint": {
+                  "type": ["string", "null"],
+                  "format": "uri"
+                },
+                "tokenEndpoint": {
+                  "type": ["string", "null"],
+                  "format": "uri"
+                },
+                "userinfoEndpoint": {
+                  "type": ["string", "null"],
+                  "format": "uri"
+                },
+                "jwksUri": {
+                  "type": ["string", "null"],
+                  "format": "uri"
+                },
+                "userinfoHandler": {
+                  "type": ["string", "null"]
+                },
+                "resourceId": {
+                  "type": ["string", "null"]
+                },
+                "userinfoUid": {
+                  "type": ["string", "null"]
+                }
+              },
+              "additionalProperties": false
+            },
+            "ssoSettings": {
+              "type": "object",
+              "properties": {
+                "ssoEnabled": {
+                  "type": "string",
+                  "enum": ["true", "false"]
+                },
+                "ssoRequired": {
+                  "type": "string",
+                  "enum": ["true", "false"]
+                },
+                "ssoType": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "role": {
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": ["string", "null"]
+            },
+            "value": {
+              "type": ["string", "null"]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "observability": {
+      "type": "object",
+      "properties": {
+        "logging_stack": {
+          "type": "string",
+          "enum": ["LEGACY", "HYBRID"]
+        },
+        "exporters": {
+          "type": "object",
+          "properties": {
+            "datadog": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "secretName": {
+                  "type": ["string", "null"]
+                }
+              }
+            },
+            "prometheus": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "secretName": {
+                  "type": ["string", "null"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "pretrained_models": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "featureFlag": {
+      "type": "object",
+      "properties": {
+        "launchDarklySdkKey": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "string"
+            },
+            "secretRef": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "launchDarklyRelayEndpoint": {
+          "type": "string"
+        },
+        "launchDarklyRelayIngressEndpoint": {
+          "type": "string"
+        },
+        "launchDarklyClientSideId": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "string"
+            },
+            "secretRef": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

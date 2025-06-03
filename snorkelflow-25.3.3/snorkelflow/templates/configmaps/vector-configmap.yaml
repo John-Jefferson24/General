@@ -1,0 +1,89 @@
+{{- if ne .Values.observability.logging_stack "LEGACY" }}
+apiVersion: v1
+data:
+  sinks.vector.yaml: |-
+    type: vector
+    address: "vector:6000"
+    version: "2"
+    inputs: ["exported_*"]
+  sources.snorkel_application_log_file.yaml: |-
+    type: file
+    include:
+      - "/var/log/snorkel/app.log"
+  transforms.exported_snorkel_application_logs.yaml: |-
+    type: remap
+    inputs: ["snorkel_application_log_file"]
+    source: |-
+      .log = parse_json!(.message)
+      .tags = {"stream": "application", "service": get_env_var!("SERVICE_TYPE")}
+      .timestamp = .log.timestamp || .log.time
+      .level = .log.level
+      .service = .tags.service
+      del(.log.timestamp)
+      del(.log.time)
+      del(.log.level)
+      del(.log.unix_timestamp)
+  vector.yaml: |-
+    data_dir: /var/lib/vector
+  aggregator.sources.vector.yaml: |-
+    type: vector
+    address: "0.0.0.0:6000"
+    version: "2"
+  aggregator.transforms.vector_streams.yaml: |-
+    type: route
+    inputs: ["vector"]
+    route:
+      logs:
+        type: "is_log"
+      metrics:
+        type: "is_metric"
+      traces:
+        type: "is_trace"
+  aggregator.transforms.vector_log_streams.yaml: |-
+    type: route
+    inputs: ["vector_streams.logs"]
+    route:
+      application:
+        type: "vrl"
+        source: ".tags.stream == \"application\""
+  aggregator.sinks.clickhouse_application_logs.yaml: |-
+    type: clickhouse
+    inputs: ["vector_log_streams.application"]
+    endpoint: "http://clickhouse:8123"
+    database: "logs"
+    table: "snorkelflow"
+    date_time_best_effort: true
+    auth:
+      strategy: "basic"
+      user: "SECRET[local_exec.clickhouse_username]"
+      password: "SECRET[local_exec.clickhouse_password]"
+  aggregator.transforms.datadog_tagged_logs.yaml: |-
+    type: remap
+    inputs: ["vector_log_streams.application"]
+    source: |-
+      .ddsource = "vector"
+      .ddtags = "env:{{ .Values.traffic.ingresses.services.snorkelflow.urlPrefix }}.{{ .Values.traffic.ingresses.domain }},version:{{ .Values.version }}"
+  aggregator.sinks.datadog_logs.yaml: |-
+    type: datadog_logs
+    inputs: ["datadog_tagged_logs"]
+    default_api_key: "SECRET[local_exec.datadog_api_key]"
+    site: "SECRET[local_exec.datadog_site]"
+  aggregator.sinks.prometheus_metrics.yaml: |-
+    type: prometheus_remote_write
+    inputs: ["vector_streams.metrics"]
+    endpoint: http://prometheus:9090/api/v1/write
+    auth:
+      strategy: "basic"
+      user: "SECRET[local_exec.prometheus_username]"
+      password: "SECRET[local_exec.prometheus_password]"
+  aggregator.vector.yaml: |-
+    data_dir: /var/lib/vector
+    secret:
+      local_exec:
+        type: "exec"
+        command: ["/usr/local/bin/helpers/get-secrets"]
+kind: ConfigMap
+metadata:
+  name: vector-config-map
+  namespace: {{ .Values.projectName }}
+{{- end }}

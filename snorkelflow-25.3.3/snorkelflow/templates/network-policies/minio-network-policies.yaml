@@ -1,0 +1,194 @@
+{{- if .Values.traffic.networkPolicies.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: minio-network-policy
+  namespace: {{ .Values.projectName }}
+spec:
+  egress:
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+      to: []
+    - ports:
+        - port: 8186
+      to:
+        - podSelector:
+            matchLabels:
+              project: {{ .Values.projectName }}
+              service: telegraf
+  ingress:
+{{- if .Values.traffic.allowAllInboundTrafficOnKeyServices}}
+    - from: []
+      ports:
+        {{- if .Values.services.minio.ui.enabled }}
+        - port: 9000
+        {{- end }}
+        - port: 9001
+{{- end}}
+{{- range $rule := .Values.traffic.networkPolicies.ingresses }}
+    - from:
+{{ toYaml $rule.from | indent 4}}
+      ports:
+        {{- if .Values.services.minio.ui.enabled }}
+        - port: 9000
+        {{- end }}
+        - port: 9001
+{{- end }}
+    - from:
+        - podSelector:
+            matchLabels:
+              project: {{ .Values.projectName }}
+              service: tdm-api
+      ports:
+        {{- if .Values.services.minio.ui.enabled }}
+        - port: 9000
+        {{- end }}
+        - port: 9001
+    - from:
+        - podSelector:
+            matchLabels:
+              project: {{ .Values.projectName }}
+              service: studio-api
+      ports:
+        {{- if .Values.services.minio.ui.enabled }}
+        - port: 9000
+        {{- end }}
+        - port: 9001
+    - from:
+        - podSelector:
+            matchLabels:
+              project: {{ .Values.projectName }}
+              service: engine
+      ports:
+        {{- if .Values.services.minio.ui.enabled }}
+        - port: 9000
+        {{- end }}
+        - port: 9001
+    - from:
+        - podSelector:
+            matchLabels:
+              project: {{ .Values.projectName }}
+              service: engine-tiny
+      ports:
+        {{- if .Values.services.minio.ui.enabled }}
+        - port: 9000
+        {{- end }}
+        - port: 9001
+    - from:
+        - podSelector:
+            matchLabels:
+              project: {{ .Values.projectName }}
+              service: model-trainer
+      ports:
+        {{- if .Values.services.minio.ui.enabled }}
+        - port: 9000
+        {{- end }}
+        - port: 9001
+{{- if not .Values.services.jupyterhub.enabled }}
+    - from:
+        - podSelector:
+            matchLabels:
+              project: {{ .Values.projectName }}
+              service: notebook
+      ports:
+        {{- if .Values.services.minio.ui.enabled }}
+        - port: 9000
+        {{- end }}
+        - port: 9001
+{{- end }}
+    - from:
+        - podSelector:
+            matchLabels:
+              project: {{ .Values.projectName }}
+              service: envoy-front-proxy
+      ports:
+        {{- if .Values.services.minio.ui.enabled }}
+        - port: 9000
+        {{- end }}
+        - port: 9001
+    - from:
+        - podSelector:
+            matchLabels:
+              project: {{ .Values.projectName }}
+              service: ray-head
+      ports:
+        {{- if .Values.services.minio.ui.enabled }}
+        - port: 9000
+        {{- end }}
+        - port: 9001
+    - from:
+        - podSelector:
+            matchLabels:
+              project: {{ .Values.projectName }}
+              service: ray-worker
+      ports:
+        {{- if .Values.services.minio.ui.enabled }}
+        - port: 9000
+        {{- end }}
+        - port: 9001
+{{- if and .Values.gpu.enabled (ne (.Values.services.rayGpuWorker.max_replicas | toString) "0") }}
+    - from:
+        - podSelector:
+            matchLabels:
+              project: {{ .Values.projectName }}
+              service: ray-gpu-worker
+      ports:
+        {{- if .Values.services.minio.ui.enabled }}
+        - port: 9000
+        {{- end }}
+        - port: 9001
+{{- end }}
+    - from:
+        - podSelector:
+            matchLabels:
+              project: {{ .Values.projectName }}
+              service: studio-ray-worker
+      ports:
+        {{- if .Values.services.minio.ui.enabled }}
+        - port: 9000
+        {{- end }}
+        - port: 9001
+    - from:
+        - podSelector:
+            matchLabels:
+              project: {{ .Values.projectName }}
+              service: studio-ray-head
+      ports:
+        {{- if .Values.services.minio.ui.enabled }}
+        - port: 9000
+        {{- end }}
+        - port: 9001
+{{- if .Values.services.jupyterhub.enabled }}
+    - from:
+        - podSelector:
+            matchLabels:
+              project: {{ .Values.projectName }}
+              service: jupyterhub
+      ports:
+        {{- if .Values.services.minio.ui.enabled }}
+        - port: 9000
+        {{- end }}
+        - port: 9001
+    - from:
+        - podSelector:
+            matchLabels:
+              app: jupyterhub
+              component: singleuser-server
+              release: jupyterhub
+      ports:
+        {{- if .Values.services.minio.ui.enabled }}
+        - port: 9000
+        {{- end }}
+        - port: 9001
+{{- end }}
+  podSelector:
+    matchLabels:
+      project: {{ .Values.projectName }}
+      service: minio
+  policyTypes:
+    - Ingress
+    - Egress
+{{- end }}

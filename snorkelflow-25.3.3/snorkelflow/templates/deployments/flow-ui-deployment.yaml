@@ -1,0 +1,209 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    always-pinned: "0"
+    service: flow-ui
+    project: {{ .Values.projectName }}
+    snorkel.ai/compute-type: cpu
+{{- if or .Values.services.flowUi.labels .Values.services.labels }}
+{{ toYaml (merge .Values.services.flowUi.labels .Values.services.labels) | indent 4 }}
+{{- end }}
+  name: flow-ui
+  namespace: {{ .Values.projectName }}
+spec:
+  strategy:
+    type: Recreate
+  replicas: 1
+{{- if .Values.services.progressDeadlineSeconds }}
+  progressDeadlineSeconds: {{ .Values.services.progressDeadlineSeconds }}
+{{- end }}
+  selector:
+    matchLabels:
+      service: flow-ui
+      project: {{ .Values.projectName }}
+  template:
+    metadata:
+      labels:
+        always-pinned: "0"
+        service: flow-ui
+        project: {{ .Values.projectName }}
+        snorkel.ai/compute-type: cpu
+{{- if or .Values.services.flowUi.labels .Values.services.labels }}
+{{ toYaml (merge .Values.services.flowUi.labels .Values.services.labels) | indent 8 }}
+{{- end }}
+    spec:
+{{- if or .Values.affinity.binPackAlwaysPinnedPods .Values.affinity.nodeAffinity }}
+      affinity:
+        {{- if .Values.affinity.binPackAlwaysPinnedPods }}
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: always-pinned
+                operator: In
+                values:
+                - "1"
+            topologyKey: kubernetes.io/hostname
+            namespaceSelector: {}
+        {{- end }}
+        {{- with .Values.affinity.nodeAffinity }}
+        nodeAffinity:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+{{- end }}
+      {{- with .Values.affinity.nodeSelectors }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      imagePullSecrets:
+        - name: {{ .Values.image.imagePullSecret | default "regcred" }}
+      securityContext:
+        runAsUser: 99
+        fsGroup: 99
+      serviceAccountName: snorkelflow-sa
+      volumes:
+      - name: empty-dir
+        emptyDir: {}
+      - name: data
+        persistentVolumeClaim:
+          claimName: {{ template "snorkelflow.pvcName" . }}
+{{- if .Values.services.flowUi.secretsFromFile }}
+      - name: influxdb-secret-volume
+        secret:
+          secretName: influxdb-secret
+{{- end }}
+{{- with include "logging.volumes" (deepCopy . | merge (dict "service_type" "flow-ui")) }}
+{{ . | indent 6 }}
+{{- end }}
+      containers:
+      - env:
+        - name: SERVICE_TYPE
+          value: flow-ui
+        - name: SNORKEL_FLOW_VERSION
+          value: "{{ .Values.version }}"
+        - name: LOGGING_STACK
+          value: {{ .Values.observability.logging_stack }}
+        - name: MINIO_UI_ENABLED
+          value: "{{ ternary "1" "0" .Values.services.minio.ui.enabled }}"
+        - name: SNORKELFLOW_MOUNT_DIR
+          value: /data
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: STUDIO_API_URL
+          value: http://studio-api:8484
+        - name: TDM_API_URL
+          value: http://tdm-api:8686
+        - name: TELEGRAF_CADVISOR_URL
+          value: telegraf:8186
+        - name: TELEGRAF_URL
+          value: http://telegraf:8125
+        - name: INFLUXDB_V2_URL
+          value: http://influxdb:8086
+{{- if .Values.services.flowUi.secretsFromFile }}
+        - name: INFLUXDB_ACCESS_KEY_FILE
+          value: /etc/secrets/influxdb-secret/influxdb_access_key
+        - name: INFLUXDB_BUCKET_FILE
+          value: /etc/secrets/influxdb-secret/influxdb_bucket
+{{- else }}
+        - name: INFLUXDB_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: influxdb-secret
+              key: influxdb_access_key
+        - name: INFLUXDB_BUCKET
+          valueFrom:
+            secretKeyRef:
+              name: influxdb-secret
+              key: influxdb_bucket
+{{- end }}
+{{- with include "launchDarkly.envVars" (deepCopy . | merge (dict "service_type" "flow-ui")) -}}
+{{ . | indent 8 }}
+{{- end }}
+{{- if .Values.authentication.jwt.enabled }}
+        - name: SSO_ENABLE_JWT_LOGIN
+          value: "{{ .Values.authentication.jwt.enabled }}"
+{{- end }}
+{{- if .Values.traffic.basePath }}
+        - name: NEXT_PUBLIC_BASE_PATH
+          value: "{{ .Values.traffic.basePath }}"
+{{- end }}
+{{- range $k, $v := (merge .Values.services.flowUi.env .Values.services.env) }}
+        - name: {{ $k }}
+          value: {{ $v | toString | quote }}
+{{- end }}
+        {{- if .Values.image.imageNames.flowUi }}
+        image: {{ .Values.image.imageNames.flowUi }}
+        {{- else if .Values.gpu.enabled }}
+        image: {{ template "snorkelflow.registryPrefix" . }}snorkelai/flow-ui:{{ .Values.version }}-cuda
+        {{- else}}
+        image: {{ template "snorkelflow.registryPrefix" . }}snorkelai/flow-ui:{{ .Values.version }}
+        {{- end }}
+        {{- if .Values.image.imagePullPolicy }}
+        imagePullPolicy: {{ .Values.image.imagePullPolicy }}
+        {{- end }}
+        name: flow-ui
+        {{- if .Values.services.flowUi.containerSecurityContext }}
+        securityContext:
+          {{- toYaml .Values.services.flowUi.containerSecurityContext | nindent 10 }}
+        {{- end }}
+        ports:
+        - containerPort: 5000
+        volumeMounts:
+        - mountPath: /tmp
+          subPath: tmp-dir
+          name: empty-dir
+        - mountPath: /var/log
+          subPath: log-dir
+          name: empty-dir
+        - mountPath: /data
+          name: data
+{{- if .Values.services.flowUi.secretsFromFile }}
+        - mountPath: /etc/secrets/influxdb-secret
+          name: influxdb-secret-volume
+          readOnly: true
+{{- end }}
+{{- with include "logging.mounts" (deepCopy . | merge (dict "service_type" "flow-ui")) }}
+{{ . | indent 8 }}
+{{- end }}
+        resources:
+{{- if .Values.services.flowUi.resources }}
+{{ toYaml .Values.services.flowUi.resources | indent 10 }}
+{{- else }}
+          requests:
+            memory: 4.0Gi
+            cpu: "2.0"
+          limits:
+            memory: 4.0Gi
+            cpu: "2.0"
+{{- end }}
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          periodSeconds: 30
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          periodSeconds: 30
+          failureThreshold: 120
+{{- with include "logging.sidecar" (deepCopy . | merge (dict "service_type" "flow-ui")) }}
+{{ . | indent 6 }}
+{{- end }}

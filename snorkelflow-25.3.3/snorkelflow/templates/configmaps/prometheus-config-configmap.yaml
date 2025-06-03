@@ -1,0 +1,12 @@
+{{- if and (ne .Values.observability.logging_stack "LEGACY") .Values.observability.exporters.prometheus.enabled }}
+apiVersion: v1
+data:
+  prometheus.yml: |-
+    global:
+      scrape_interval: 15s # Set the scrape interval to every 15 seconds. Default is every 1 minute.
+      evaluation_interval: 15s # Evaluate rules every 15 seconds. The default is every 1 minute.
+kind: ConfigMap
+metadata:
+  name: prometheus-config-config-map
+  namespace: {{ .Values.projectName }}
+{{- end }}

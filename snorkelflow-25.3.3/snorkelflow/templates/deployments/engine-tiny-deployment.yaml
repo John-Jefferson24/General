@@ -1,0 +1,280 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    always-pinned: "1"
+    service: engine-tiny
+    project: {{ .Values.projectName }}
+    snorkel.ai/compute-type: cpu
+{{- if or .Values.services.engineTiny.labels .Values.services.labels }}
+{{ toYaml (merge .Values.services.engineTiny.labels .Values.services.labels) | indent 4 }}
+{{- end }}
+  name: engine-tiny
+  namespace: {{ .Values.projectName }}
+spec:
+  strategy:
+    type: Recreate
+  replicas: 1
+{{- if .Values.services.progressDeadlineSeconds }}
+  progressDeadlineSeconds: {{ .Values.services.progressDeadlineSeconds }}
+{{- end }}
+  selector:
+    matchLabels:
+      service: engine-tiny
+      project: {{ .Values.projectName }}
+  template:
+    metadata:
+      labels:
+        always-pinned: "1"
+        service: engine-tiny
+        project: {{ .Values.projectName }}
+        snorkel.ai/compute-type: cpu
+{{- if or .Values.services.engineTiny.labels .Values.services.labels }}
+{{ toYaml (merge .Values.services.engineTiny.labels .Values.services.labels) | indent 8 }}
+{{- end }}
+    spec:
+{{- if or .Values.affinity.binPackAlwaysPinnedPods .Values.affinity.nodeAffinity }}
+      affinity:
+        {{- if .Values.affinity.binPackAlwaysPinnedPods }}
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: always-pinned
+                operator: In
+                values:
+                - "0"
+            topologyKey: kubernetes.io/hostname
+            namespaceSelector: {}
+        {{- end }}
+        {{- with .Values.affinity.nodeAffinity }}
+        nodeAffinity:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+{{- end }}
+      {{- with .Values.affinity.nodeSelectors }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      imagePullSecrets:
+        - name: {{ .Values.image.imagePullSecret | default "regcred" }}
+      securityContext:
+        runAsUser: 99
+        fsGroup: 99
+      serviceAccountName: snorkelflow-internal-k8s-rw-sa
+      containers:
+        - env:
+            - name: SERVICE_TYPE
+              value: engine-tiny
+            - name: SNORKEL_FLOW_VERSION
+              value: "{{ .Values.version }}"
+            - name: NUM_WORKERS_TINY
+              value: "4"
+            - name: NUM_WORKERS_SMALL
+              value: "0"
+            - name: NUM_WORKERS_LARGE
+              value: "0"
+            - name: NUM_WORKERS_MODEL_SMALL
+              value: "0"
+            - name: NUM_WORKERS_MODEL_LARGE
+              value: "0"
+            - name: RAY_HEAD_URL
+              value: ray://ray-head:10001
+            - name: RAY_HEAD_REDIS_PORT
+              value: '7379'
+            - name: DASK_DISTRIBUTED__ADMIN__LOG_FORMAT
+              value: "%(levelname)s %(asctime)s.%(msecs).03d %(processName)s %(threadName)s %(name)s %(filename)s:%(lineno)d %(message)s"
+            - name: DASK_DISTRIBUTED__WORKER__PROFILE__INTERVAL
+              value: "1d"
+            - name: DASK_DISTRIBUTED__WORKER__PROFILE__CYCLE
+              value: "1d"
+            - name: ENABLE_ROUTINE_ANALYZE
+              value: "True"
+            - name: DB_MINCONN
+              value: "9"
+            - name: DB_MAXCONN
+              value: "19"
+{{- if eq .Values.autoscaling.worker_autoscaling "1" }}
+            - name: POD_AUTOSCALING_ENABLED
+              value: "1"
+{{- else }}
+            - name: POD_AUTOSCALING_ENABLED
+              value: "0"
+{{- end }}
+            - name: RAY_WORKER_REPLICA_DEFAULT_COUNT
+              value: {{ .Values.services.rayWorker.max_replicas | quote }}
+            - name: RAY_GPU_WORKER_REPLICA_DEFAULT_COUNT
+              value: {{ .Values.services.rayGpuWorker.max_replicas | quote }}
+            - name: ENABLE_IPV6
+              value: "False"
+            - name: SSO_HOST_IP
+              value: {{ .Values.traffic.ingresses.services.snorkelflow.urlPrefix }}.{{ .Values.traffic.ingresses.domain }}
+            - name: ENABLE_PRETRAINED_MODEL_DIRECTORY
+              value: {{ .Values.pretrained_models.enabled | toString | title | quote }}
+            - name: LD_PRELOAD
+              value: /usr/lib/x86_64-linux-gnu/libjemalloc.so.2
+            - name: MALLOC_CONF
+              value: background_thread:true
+            - name: MALLOC_MMAP_THRESHOLD_
+              value: "16384"
+            - name: CUPY_CACHE_DIR
+              value: /var/lib/snorkel/.cupy-cache
+{{- if eq .Values.autoscaling.cluster_autoscaling.pod_disruption_budget_toggling "1" }}
+            - name: PDB_TOGGLING_ENABLED
+              value: "1"
+{{- else }}
+            - name: PDB_TOGGLING_ENABLED
+              value: "0"
+{{- end }}
+{{- with include "launchDarkly.envVars" . }}
+{{ . | indent 12 }}
+{{- end }}
+            - name: LOGGING_STACK
+              value: {{ .Values.observability.logging_stack }}
+            - name: SNORKELFLOW_MOUNT_DIR
+              value: /data
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: REDIS_URL
+              value: redis
+            - name: MINIO_URL
+              value: http://minio:9001
+            - name: TELEGRAF_CADVISOR_URL
+              value: telegraf:8186
+            - name: TELEGRAF_URL
+              value: http://telegraf:8125
+{{- if .Values.services.engineTiny.secretsFromFile }}
+            - name: TDM_CONN_STR_FILE
+              value: /etc/secrets/db-secret/tdm_conn_str
+            - name: MINIO_ACCESS_KEY_FILE
+              value: /etc/secrets/minio-secret/minio_access_key
+            - name: MINIO_SECRET_KEY_FILE
+              value: /etc/secrets/minio-secret/minio_secret_key
+{{- else }}
+            - name: TDM_CONN_STR
+              valueFrom:
+                secretKeyRef:
+                  name: db-secret
+                  key: tdm_conn_str
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-secret
+                  key: minio_access_key
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-secret
+                  key: minio_secret_key
+{{- end }}
+{{- if and .Values.influx_cloud_key .Values.services.engineTiny.secretsFromFile}}
+            - name: INFLUXDB_CLOUD_TOKEN_G498_FILE
+              value: /etc/secrets/influxdb-cloud-secret/influxdb_cloud_token
+{{- else if .Values.influx_cloud_key }}
+            - name: INFLUXDB_CLOUD_TOKEN_G498
+              valueFrom:
+                secretKeyRef:
+                  name: influxdb-cloud-secret
+                  key: influxdb_cloud_token
+{{- end }}
+{{- range $k, $v := (merge .Values.services.engineTiny.env .Values.services.env) }}
+            - name: {{ $k }}
+              value: {{ $v | toString | quote }}
+{{- end }}
+          {{- if .Values.image.imageNames.engine }}
+          image: {{ .Values.image.imageNames.engine }}
+          {{- else if .Values.gpu.enabled }}
+          image: {{ template "snorkelflow.registryPrefix" . }}snorkelai/engine:{{ .Values.version }}-cuda
+          {{- else}}
+          image: {{ template "snorkelflow.registryPrefix" . }}snorkelai/engine:{{ .Values.version }}
+          {{- end }}
+          {{- if .Values.image.imagePullPolicy }}
+          imagePullPolicy: {{ .Values.image.imagePullPolicy }}
+          {{- end }}
+          name: engine-tiny
+          {{- if .Values.services.engineTiny.containerSecurityContext }}
+          securityContext:
+            {{- toYaml .Values.services.engineTiny.containerSecurityContext | nindent 12 }}
+          {{- end }}
+          args:
+            - worker
+          ports: []
+          volumeMounts:
+            - name: empty-dir
+              mountPath: /tmp
+              subPath: tmp-dir
+            - name: empty-dir
+              mountPath: /var/log
+              subPath: log-dir
+            - name: empty-dir
+              mountPath: /.cache
+              subPath: cache-dir
+            - mountPath: /data
+              name: data
+            - mountPath: /etc/auth/jwt
+              name: jwt-key-pub
+{{- if .Values.services.engineTiny.secretsFromFile }}
+            - name: minio-secret-volume
+              mountPath: /etc/secrets/minio-secret
+              readOnly: true
+            - mountPath: /etc/secrets/db-secret
+              name: db-secret-volume
+              readOnly: true
+{{- if .Values.influx_cloud_key }}
+            - mountPath: /etc/secrets/influxdb-cloud-secret
+              name: influxdb-cloud-secret-volume
+              readOnly: true
+{{- end }}
+{{- end }}
+{{- with include "logging.mounts" (deepCopy . | merge (dict "service_type" "engine-tiny")) }}
+{{ . | indent 12 }}
+{{- end }}
+          resources:
+{{- if .Values.services.engineTiny.resources }}
+{{ toYaml .Values.services.engineTiny.resources | indent 12 }}
+{{- else }}
+            requests:
+              memory: 16.0Gi
+              cpu: "4.0"
+            limits:
+              memory: 16.0Gi
+              cpu: "4.0"
+{{- end }}
+{{- with include "logging.sidecar" (deepCopy . | merge (dict "service_type" "engine-tiny")) }}
+{{ . | indent 8 }}
+{{- end }}
+      volumes:
+        - name: empty-dir
+          emptyDir: {}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ template "snorkelflow.pvcName" . }}
+        - name: jwt-key-pub
+          secret:
+            secretName: jwt-key-pub
+{{- if .Values.services.engineTiny.secretsFromFile }}
+        - name: minio-secret-volume
+          secret:
+            secretName: minio-secret
+        - name: db-secret-volume
+          secret:
+            secretName: db-secret
+{{- if .Values.influx_cloud_key }}
+        - name: influxdb-cloud-secret-volume
+          secret:
+            secretName: influxdb-cloud-secret
+{{- end }}
+{{- end }}
+{{- with include "logging.volumes" (deepCopy . | merge (dict "service_type" "engine-tiny")) }}
+{{ . | indent 8 }}
+{{- end }}

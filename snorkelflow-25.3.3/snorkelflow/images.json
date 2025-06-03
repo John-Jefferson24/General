@@ -1,0 +1,43 @@
+{
+  "docker_hub_repo": "snorkelai",
+  "custom_images": {
+    "clickhouse": "clickhouse:25.3.2.39a",
+    "envoy": "envoy:v1.33.2a",
+    "grafana": "grafana:11.6.0a",
+    "influxdb": "influxdb:2.7.11d",
+    "minio": "minio:RELEASE.2022-05-26T05-48-41Zm",
+    "postgres": "postgres:16.8a",
+    "prometheus": "prometheus:3.3.0a",
+    "redis": "redis:7.2.7b",
+    "telegraf": "telegraf:1.29.5l",
+    "jupyterhub": "jupyterhub:4.0.0g",
+    "jupyterhub-proxy": "jupyterhub-proxy:4.6.3c",
+    "jobengine-server": "jobengine-server:v0.5.1",
+    "vector": "vector:0.46.0a"
+  },
+  "snorkel_images": [
+    "authorization-api",
+    "engine",
+    "flow-ui",
+    "notebook",
+    "secrets-generator",
+    "singleuser-notebook",
+    "snorkelflow-whl",
+    "storage-api",
+    "studio-api",
+    "tdm-api"
+  ],
+  "snorkel_dev_images": [
+    "authorization-api-dev",
+    "engine-dev",
+    "flow-ui-dev",
+    "notebook-dev",
+    "secrets-generator-dev",
+    "singleuser-notebook-dev",
+    "snorkelflow-whl-dev",
+    "storage-api-dev",
+    "studio-api-dev",
+    "tdm-api-dev"
+  ],
+  "version": 2
+}

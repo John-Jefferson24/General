@@ -1,0 +1,11 @@
+{{- if .Values.services.jupyterhub.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  {{- if and .Values.authentication.role.key .Values.authentication.role.value }}
+  annotations:
+    {{ .Values.authentication.role.key }}: {{ .Values.authentication.role.value }}
+  {{- end}}
+  name: jupyterhub-sa
+  namespace: {{ .Values.projectName }}
+{{- end }}

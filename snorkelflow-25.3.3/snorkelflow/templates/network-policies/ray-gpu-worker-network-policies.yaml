@@ -1,0 +1,107 @@
+{{- if and .Values.gpu.enabled (ne (.Values.services.rayGpuWorker.max_replicas | toString) "0") }}
+{{- if .Values.traffic.networkPolicies.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  annotations:
+  name: ray-gpu-worker-network-policy
+  namespace: {{ .Values.projectName }}
+spec:
+  egress:
+  - ports:
+    - port: 53
+      protocol: UDP
+    - port: 53
+      protocol: TCP
+    to: []
+{{- if .Values.traffic.allowInternetAccess}}
+  - to:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+        except:
+        - 192.168.0.0/16
+        - 172.16.0.0/20
+{{- end }}
+  - ports:
+    - port: 6379
+    to:
+    - podSelector:
+        matchLabels:
+          project: {{ .Values.projectName }}
+          service: redis
+  - ports:
+    {{- if .Values.services.minio.ui.enabled }}
+    - port: 9000
+    {{- end }}
+    - port: 9001
+    to:
+    - podSelector:
+        matchLabels:
+          project: {{ .Values.projectName }}
+          service: minio
+  - ports:
+    - port: 8186
+    - port: 8125
+      protocol: UDP
+    to:
+    - podSelector:
+        matchLabels:
+          project: {{ .Values.projectName }}
+          service: telegraf
+  - ports:
+    - port: 5432
+    to:
+    - podSelector:
+        matchLabels:
+          project: {{ .Values.projectName }}
+          service: db
+  - ports: []
+    to:
+    - podSelector:
+        matchLabels:
+          project: {{ .Values.projectName }}
+          service: ray-head
+  - ports:
+    - port: 31315
+    to:
+    - podSelector:
+        matchLabels:
+          project: {{ .Values.projectName }}
+          service: storage-api
+  - ports: []
+    to:
+    - podSelector:
+        matchLabels:
+          project: {{ .Values.projectName }}
+          service: ray-gpu-worker
+  {{- if ne .Values.observability.logging_stack "LEGACY" }}
+  - to:
+    - podSelector:
+        matchLabels:
+          project: {{ .Values.projectName }}
+          service: vector
+    ports:
+    - port: 6000
+{{- end }}
+  ingress:
+  - ports: []
+    from:
+    - podSelector:
+        matchLabels:
+          project: {{ .Values.projectName }}
+          service: ray-head
+  - ports: []
+    from:
+    - podSelector:
+        matchLabels:
+          project: {{ .Values.projectName }}
+          service: ray-gpu-worker
+  podSelector:
+    matchLabels:
+      project: {{ .Values.projectName }}
+      service: ray-gpu-worker
+  policyTypes:
+  - Ingress
+  - Egress
+{{- end }}
+{{- end }}

@@ -1,0 +1,231 @@
+{{- $images := .Files.Get "images.json" | fromJson }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    always-pinned: "0"
+    service: grafana
+    project: {{ .Values.projectName }}
+    snorkel.ai/compute-type: cpu
+{{- if or .Values.services.grafana.labels .Values.services.labels }}
+{{ toYaml (merge .Values.services.grafana.labels .Values.services.labels) | indent 4 }}
+{{- end }}
+  name: grafana
+  namespace: {{ .Values.projectName }}
+spec:
+  strategy:
+    type: Recreate
+  replicas: 1
+{{- if .Values.services.progressDeadlineSeconds }}
+  progressDeadlineSeconds: {{ .Values.services.progressDeadlineSeconds }}
+{{- end }}
+  selector:
+    matchLabels:
+      service: grafana
+      project: {{ .Values.projectName }}
+  template:
+    metadata:
+      labels:
+        always-pinned: "0"
+        service: grafana
+        project: {{ .Values.projectName }}
+        snorkel.ai/compute-type: cpu
+{{- if or .Values.services.grafana.labels .Values.services.labels }}
+{{ toYaml (merge .Values.services.grafana.labels .Values.services.labels) | indent 8 }}
+{{- end }}
+    spec:
+{{- if or .Values.affinity.binPackAlwaysPinnedPods .Values.affinity.nodeAffinity }}
+      affinity:
+        {{- if .Values.affinity.binPackAlwaysPinnedPods }}
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: always-pinned
+                operator: In
+                values:
+                - "1"
+            topologyKey: kubernetes.io/hostname
+            namespaceSelector: {}
+        {{- end }}
+        {{- with .Values.affinity.nodeAffinity }}
+        nodeAffinity:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+{{- end }}
+      {{- with .Values.affinity.nodeSelectors }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      imagePullSecrets:
+        - name: {{ .Values.image.imagePullSecret | default "regcred" }}
+      securityContext:
+        fsGroup: 99
+        runAsUser: 99
+      serviceAccountName: snorkelflow-sa
+      containers:
+      - env:
+        - name: SERVICE_TYPE
+          value: grafana
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: INFLUXDB_V2_URL
+          value: http://influxdb:8086
+        - name: TELEGRAF_CADVISOR_URL
+          value: telegraf:8186
+{{- if not .Values.services.grafana.secretsFromFile }}
+{{- /*
+        # When using file-based secrets, these environment variables can be omitted.
+        # Instead, use $__file{/<secret-file-path>} in the grafana-config,grafana-datasources ConfigMaps.
+        # Grafana's file provider supports reading secrets from mounted files.
+        # Reference: https://grafana.com/docs/grafana/latest/setup-grafana/configure-grafana/#file-provider
+*/}}
+        - name: INFLUXDB_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: influxdb-secret
+              key: influxdb_access_key
+        - name: INFLUXDB_BUCKET
+          valueFrom:
+            secretKeyRef:
+              name: influxdb-secret
+              key: influxdb_bucket
+        - name: GRAFANA_ADMIN_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: grafana-secret
+              key: grafana_admin_username
+        - name: GRAFANA_ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: grafana-secret
+              key: grafana_admin_password
+{{- end }}
+{{- range $k, $v := (merge .Values.services.grafana.env .Values.services.env) }}
+        - name: {{ $k }}
+          value: {{ $v | toString | quote }}
+{{- end }}
+        {{- if .Values.image.imageNames.grafana }}
+        image: {{ .Values.image.imageNames.grafana }}
+        {{- else }}
+        image: {{ template "snorkelflow.registryPrefix" . }}{{ $images.docker_hub_repo }}/{{ get $images.custom_images "grafana" }}
+        {{- end }}
+        name: grafana
+        {{- if .Values.services.grafana.containerSecurityContext }}
+        securityContext:
+          {{- toYaml .Values.services.grafana.containerSecurityContext | nindent 10 }}
+        {{- end }}
+        ports:
+        - containerPort: 3000
+        volumeMounts:
+        - mountPath: /tmp
+          subPath: tmp-dir
+          name: empty-dir
+        - mountPath: /var/log
+          subPath: log-dir
+          name: empty-dir
+        - mountPath: /var/lib/grafana
+          subPath: grafana-storage-dir
+          name: empty-dir
+        - name: grafana-datasource
+          mountPath: /etc/grafana/provisioning/datasources
+        - name: grafana-dashboard
+          mountPath: /etc/grafana/provisioning/dashboards
+        - name: grafana-dashboard-json
+          mountPath: /var/lib/grafana/dashboards
+        - name: grafana-config
+          mountPath: /etc/grafana
+        - name: grafana-notifiers-config-yaml
+          mountPath: /etc/grafana/provisioning/notifiers
+{{- if .Values.services.grafana.secretsFromFile }}
+        - name: grafana-secret-volume
+          mountPath: /etc/secrets/grafana-secret
+          readOnly: true
+        - name: influxdb-secret-volume
+          mountPath: /etc/secrets/influxdb-secret
+          readOnly: true
+{{- end }}
+{{- if ne .Values.observability.logging_stack "LEGACY" }}
+        - name: clickhouse-secret-volume
+          mountPath: /etc/secrets/clickhouse
+          readOnly: true
+{{- if .Values.observability.exporters.prometheus.enabled }}
+        - name: prometheus-secret-volume
+          mountPath: /etc/secrets/prometheus
+          readOnly: true
+{{- end }}
+{{- end }}
+        resources:
+{{- if .Values.services.grafana.resources }}
+{{ toYaml .Values.services.grafana.resources | indent 10 }}
+{{- else }}
+          requests:
+            memory: 2.0Gi
+            cpu: "1.0"
+          limits:
+            memory: 2.0Gi
+            cpu: "1.0"
+{{- end }}
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: 3000
+          initialDelaySeconds: 3
+          periodSeconds: 30
+        startupProbe:
+          httpGet:
+            path: /api/health
+            port: 3000
+          periodSeconds: 30
+          failureThreshold: 120
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: 3000
+          periodSeconds: 30
+      volumes:
+      - name: empty-dir
+        emptyDir: {}
+      - name: grafana-datasource
+        configMap:
+          name: grafana-datasource
+      - name: grafana-dashboard
+        configMap:
+          name: grafana-dashboard
+      - name: grafana-dashboard-json
+        configMap:
+          name: grafana-dashboard-json
+      - name: grafana-config
+        configMap:
+          name: grafana-config
+      - name: grafana-notifiers-config-yaml
+        configMap:
+          name: grafana-notifiers-config-yaml
+{{- if .Values.services.grafana.secretsFromFile }}
+      - name: grafana-secret-volume
+        secret:
+          secretName: grafana-secret
+      - name: influxdb-secret-volume
+        secret:
+          secretName: influxdb-secret
+{{- end }}
+{{- if ne .Values.observability.logging_stack "LEGACY" }}
+      - name: clickhouse-secret-volume
+        secret:
+          secretName: clickhouse-secret
+{{- if .Values.observability.exporters.prometheus.enabled }}
+      - name: prometheus-secret-volume
+        secret:
+          secretName: {{ .Values.observability.exporters.prometheus.secretName | default "prometheus-secret" | quote }}
+{{- end }}
+{{- end }}

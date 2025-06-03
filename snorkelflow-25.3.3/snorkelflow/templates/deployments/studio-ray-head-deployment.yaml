@@ -1,0 +1,219 @@
+{{- $images := .Files.Get "images.json" | fromJson }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    always-pinned: "1"
+    service: studio-ray-head
+    project: {{ .Values.projectName }}
+    snorkel.ai/compute-type: cpu
+    snorkel.ai/ray-cluster-name: studio-ray-cluster
+{{- if or .Values.services.studioRayHead.labels .Values.services.labels}}
+{{ toYaml (merge .Values.services.studioRayHead.labels .Values.services.labels) | indent 4 }}
+{{- end }}
+  name: studio-ray-head
+  namespace: {{ .Values.projectName }}
+spec:
+  strategy:
+    type: Recreate
+  replicas: 1
+{{- if .Values.services.progressDeadlineSeconds }}
+  progressDeadlineSeconds: {{ .Values.services.progressDeadlineSeconds }}
+{{- end }}
+  selector:
+    matchLabels:
+      service: studio-ray-head
+      project: {{ .Values.projectName }}
+  template:
+    metadata:
+      labels:
+        always-pinned: "1"
+        service: studio-ray-head
+        project: {{ .Values.projectName }}
+        snorkel.ai/compute-type: cpu
+        snorkel.ai/ray-cluster-name: studio-ray-cluster
+{{- if or .Values.services.studioRayHead.labels .Values.services.labels }}
+{{ toYaml (merge .Values.services.studioRayHead.labels .Values.services.labels) | indent 8 }}
+{{- end }}
+    spec:
+{{- if or .Values.affinity.binPackAlwaysPinnedPods .Values.affinity.nodeAffinity }}
+      affinity:
+        {{- if .Values.affinity.binPackAlwaysPinnedPods }}
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: always-pinned
+                operator: In
+                values:
+                - "0"
+            topologyKey: kubernetes.io/hostname
+            namespaceSelector: {}
+        {{- end }}
+        {{- with .Values.affinity.nodeAffinity }}
+        nodeAffinity:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+{{- end }}
+      {{- with .Values.affinity.nodeSelectors }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      imagePullSecrets:
+        - name: {{ .Values.image.imagePullSecret | default "regcred" }}
+      securityContext:
+        runAsUser: 99
+        fsGroup: 99
+      serviceAccountName: snorkelflow-sa
+      containers:
+        - env:
+            - name: SERVICE_TYPE
+              value: studio-ray-head
+            - name: SNORKEL_FLOW_VERSION
+              value: "config_test"
+            - name: STUDIO_RAY_HEAD_MEMORY_GB
+              value: "16"
+            - name: STUDIO_RAY_ENABLED
+              value: "1"
+            - name: RAY_DASHBOARD_BUILD_FOLLOW_SYMLINKS
+              value: "1"
+            - name: LD_PRELOAD
+              value: /usr/lib/x86_64-linux-gnu/libjemalloc.so.2
+            - name: MALLOC_CONF
+              value: background_thread:true
+            - name: MALLOC_MMAP_THRESHOLD_
+              value: "16384"
+            - name: CUPY_CACHE_DIR
+              value: /var/lib/snorkel/.cupy-cache
+            - name: LOGGING_STACK
+              value: {{ .Values.observability.logging_stack }}
+            - name: SNORKELFLOW_MOUNT_DIR
+              value: /data
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: STUDIO_API_URL
+              value: http://studio-api:8484
+            - name: REDIS_URL
+              value: redis
+            - name: MINIO_URL
+              value: http://minio:9001
+            - name: TELEGRAF_CADVISOR_URL
+              value: telegraf:8186
+            - name: TELEGRAF_URL
+              value: http://telegraf:8125
+{{- if .Values.services.studioRayHead.secretsFromFile }}
+            - name: TDM_CONN_STR_FILE
+              value: /etc/secrets/db-secret/tdm_conn_str
+{{- else }}
+            - name: TDM_CONN_STR
+              valueFrom:
+                secretKeyRef:
+                  name: db-secret
+                  key: tdm_conn_str
+{{- end }}
+{{- if and .Values.traffic.istio.enabled ((.Values.traffic.istio).mtls).enabled }}
+            - name: IS_ISTIO_STRICT_MTLS_ENABLED
+              value: "True"
+{{- end }}
+{{- with include "launchDarkly.envVars" . }}
+{{ . | indent 12 }}
+{{- end }}
+{{- range $k, $v := (merge .Values.services.studioRayHead.env .Values.services.env) }}
+            - name: {{ $k }}
+              value: {{ $v | toString | quote }}
+{{- end }}
+          {{- if .Values.image.imageNames.studio }}
+          image: {{ .Values.image.imageNames.studio }}
+          {{- else if .Values.gpu.enabled }}
+          image: {{ template "snorkelflow.registryPrefix" . }}snorkelai/studio-api:{{ .Values.version }}-cuda
+          {{- else }}
+          image: {{ template "snorkelflow.registryPrefix" . }}snorkelai/studio-api:{{ .Values.version }}
+          {{- end }}
+          {{- if .Values.image.imagePullPolicy }}
+          imagePullPolicy: {{ .Values.image.imagePullPolicy }}
+          {{- end }}
+          name: studio-ray-head
+          {{- if .Values.services.studioRayHead.containerSecurityContext }}
+          securityContext:
+            {{- toYaml .Values.services.studioRayHead.containerSecurityContext | nindent 12 }}
+          {{- end }}
+          args:
+            - ray-head
+            - --ray-head-port=7380
+            - --ray-head-client-port=10002
+            - --ray-head-dashboard-port=8266
+            {{- if .Values.volumes.snorkelflowData.smb }}
+            - --data-dir-is-smb=True
+            {{- else }}
+            - --data-dir-is-smb=False
+            {{- end }}
+          ports:
+            - containerPort: 7380
+            - containerPort: 8266
+            - containerPort: 10002
+          volumeMounts:
+            - mountPath: /tmp
+              name: empty-dir
+              subPath: tmp-dir
+            - mountPath: /var/log
+              name: empty-dir
+              subPath: log-dir
+            - mountPath: /data
+              name: data
+            - mountPath: /etc/auth/jwt
+              name: jwt-key-pub
+            - mountPath: /dev/shm
+              name: dshm
+{{- if .Values.services.studioRayHead.secretsFromFile }}
+            - mountPath: /etc/secrets/db-secret
+              name: db-secret-volume
+              readOnly: true
+{{- end }}
+{{- with include "logging.mounts" (deepCopy . | merge (dict "service_type" "studio-ray-head")) }}
+{{ . | indent 12 }}
+{{- end }}
+          resources:
+{{- if .Values.services.studioRayHead.resources }}
+{{ toYaml .Values.services.studioRayHead.resources | indent 12 }}
+{{- else }}
+            requests:
+              memory: 16.0Gi
+              cpu: "2.0"
+            limits:
+              memory: 16.0Gi
+              cpu: "2.0"
+{{- end }}
+{{- with include "logging.sidecar" (deepCopy . | merge (dict "service_type" "studio-ray-head")) }}
+{{ . | indent 8 }}
+{{- end }}
+      volumes:
+        - name: empty-dir
+          emptyDir: {}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ template "snorkelflow.pvcName" . }}
+        - name: jwt-key-pub
+          secret:
+            secretName: jwt-key-pub
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 10000Mi
+{{- if .Values.services.studioRayHead.secretsFromFile }}
+        - name: db-secret-volume
+          secret:
+            secretName: db-secret
+{{- end }}
+{{- with include "logging.volumes" (deepCopy . | merge (dict "service_type" "studio-ray-head")) }}
+{{ . | indent 8 }}
+{{- end }}

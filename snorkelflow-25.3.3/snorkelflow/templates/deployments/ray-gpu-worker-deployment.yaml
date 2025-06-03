@@ -1,0 +1,289 @@
+{{- if and .Values.gpu.enabled (ne (.Values.services.rayGpuWorker.max_replicas | toString) "0") }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    always-pinned: "0"
+    service: ray-gpu-worker
+    project: {{ .Values.projectName }}
+    snorkel.ai/compute-type: gpu
+    snorkel.ai/ray-autoscaler-cluster: engine-ray
+    snorkel.ai/ray-autoscaler-kind: worker
+    snorkel.ai/ray-autoscaler-type: ray-gpu-worker
+    snorkel.ai/ray-cluster-name: ray-cluster
+{{- if or .Values.services.rayGpuWorker.labels .Values.services.labels }}
+{{ toYaml (merge .Values.services.rayGpuWorker.labels .Values.services.labels) | indent 4 }}
+{{- end }}
+  name: ray-gpu-worker
+  namespace: {{ .Values.projectName }}
+spec:
+  strategy:
+    type: Recreate
+{{- if eq .Values.autoscaling.worker_autoscaling "1" }}
+  replicas: {{ .Values.services.rayGpuWorker.min_replicas }}
+{{- else }}
+  replicas: {{ .Values.services.rayGpuWorker.max_replicas }}
+{{- end }}
+{{- if .Values.services.progressDeadlineSeconds }}
+  progressDeadlineSeconds: {{ .Values.services.progressDeadlineSeconds }}
+{{- end }}
+  selector:
+    matchLabels:
+      service: ray-gpu-worker
+      project: {{ .Values.projectName }}
+  template:
+    metadata:
+      labels:
+        always-pinned: "0"
+        service: ray-gpu-worker
+        project: {{ .Values.projectName }}
+        snorkel.ai/compute-type: gpu
+        snorkel.ai/ray-autoscaler-cluster: engine-ray
+        snorkel.ai/ray-autoscaler-kind: worker
+        snorkel.ai/ray-autoscaler-type: ray-gpu-worker
+        snorkel.ai/ray-cluster-name: ray-cluster
+{{- if or .Values.services.rayGpuWorker.labels .Values.services.labels }}
+{{ toYaml (merge .Values.services.rayGpuWorker.labels .Values.services.labels) | indent 8 }}
+{{- end }}
+    spec:
+{{- if .Values.affinity.binPackAlwaysPinnedPods }}
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: always-pinned
+                operator: In
+                values:
+                - "1"
+            topologyKey: kubernetes.io/hostname
+            namespaceSelector: {}
+{{- end }}
+      imagePullSecrets:
+        - name: {{ .Values.image.imagePullSecret | default "regcred" }}
+      securityContext:
+        runAsUser: 99
+        fsGroup: 99
+      serviceAccountName: snorkelflow-sa
+      {{- if and .Values.gpu.enabled .Values.gpu.gpu_config }}
+      {{- if .Values.gpu.gpu_config.node_selectors }}
+      nodeSelector:
+        {{- range $key, $value := .Values.gpu.gpu_config.node_selectors }}
+        {{ $key }}: "{{ $value }}"
+        {{- end }}
+      {{- end }}
+      {{- if .Values.gpu.gpu_config.schedulerName }}
+      schedulerName: {{ .Values.gpu.gpu_config.schedulerName }}
+      {{- end }}
+      {{- if .Values.gpu.gpu_config.tolerations }}
+      {{- with .Values.gpu.gpu_config.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- end }}
+{{- else }}
+  {{- if .Values.affinity.nodeSelectors }}
+    {{- with .Values.affinity.nodeSelectors }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}
+  {{- end }}
+  {{- if .Values.affinity.tolerations }}
+    {{- with .Values.affinity.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}
+  {{- end }}
+{{- end }}
+      containers:
+      - env:
+        - name: SERVICE_TYPE
+          value: ray-gpu-worker
+        {{- if and .Values.influx_cloud_key .Values.services.rayGpuWorker.secretsFromFile}}
+        - name: INFLUXDB_CLOUD_TOKEN_G498_FILE
+          value: /etc/secrets/influxdb-cloud-secret/influxdb_cloud_token
+        {{- else if .Values.influx_cloud_key}}
+        - name: INFLUXDB_CLOUD_TOKEN_G498
+          valueFrom:
+            secretKeyRef:
+              name: influxdb-cloud-secret
+              key: influxdb_cloud_token
+        {{- end }}
+        - name: HF_HOME
+          value: "/tmp/snorkel-pretrained-models"
+        - name: IS_GPU_ENABLED
+          value: "1"
+        - name: SNORKEL_FLOW_VERSION
+          value: "{{ .Values.version }}"
+        - name: ENABLE_ROUTINE_ANALYZE
+          value: "False"
+        - name: DB_MINCONN
+          value: "0"
+        - name: DB_MAXCONN
+          value: "0"
+        - name: ENABLE_IPV6
+          value: "False"
+        - name: SSO_HOST_IP
+          value: {{ .Values.traffic.ingresses.services.snorkelflow.urlPrefix }}.{{ .Values.traffic.ingresses.domain }}
+        - name: ENABLE_PRETRAINED_MODEL_DIRECTORY
+          value: {{ .Values.pretrained_models.enabled | toString | title | quote }}
+        - name: ARROW_CACHE_ENABLED
+          value: {{ if .Values.optimizations.arrow_cache.enabled }}"1"{{ else }}"0"{{ end }}
+        - name: LD_PRELOAD
+          value: /usr/lib/x86_64-linux-gnu/libjemalloc.so.2
+        - name: MALLOC_CONF
+          value: background_thread:true
+        - name: MALLOC_MMAP_THRESHOLD_
+          value: "16384"
+        - name: CUPY_CACHE_DIR
+          value: /var/lib/snorkel/.cupy-cache
+        - name: LOGGING_STACK
+          value: {{ .Values.observability.logging_stack }}
+        - name: SNORKELFLOW_MOUNT_DIR
+          value: /data
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: REDIS_URL
+          value: redis
+        - name: MINIO_URL
+          value: http://minio:9001
+        - name: TELEGRAF_CADVISOR_URL
+          value: telegraf:8186
+        - name: TELEGRAF_URL
+          value: http://telegraf:8125
+{{- if .Values.services.rayGpuWorker.secretsFromFile }}
+        - name: TDM_CONN_STR_FILE
+          value: /etc/secrets/db-secret/tdm_conn_str
+        - name: MINIO_ACCESS_KEY_FILE
+          value: /etc/secrets/minio-secret/minio_access_key
+        - name: MINIO_SECRET_KEY_FILE
+          value: /etc/secrets/minio-secret/minio_secret_key
+{{- else }}
+        - name: TDM_CONN_STR
+          valueFrom:
+            secretKeyRef:
+              name: db-secret
+              key: tdm_conn_str
+        - name: STORAGE_API_URL
+          value: http://storage-api:31315
+        - name: MINIO_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: minio-secret
+              key: minio_access_key
+        - name: MINIO_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: minio-secret
+              key: minio_secret_key
+{{- end }}
+{{- with include "launchDarkly.envVars" . }}
+{{ . | indent 8 }}
+{{- end }}
+{{- if and .Values.traffic.istio.enabled ((.Values.traffic.istio).mtls).enabled }}
+        - name: IS_ISTIO_STRICT_MTLS_ENABLED
+          value: "True"
+{{- end }}
+{{- range $k, $v := (merge .Values.services.rayGpuWorker.env .Values.services.env) }}
+        - name: {{ $k }}
+          value: {{ $v | toString | quote }}
+{{- end }}
+        {{- if .Values.image.imageNames.engine }}
+        image: {{ .Values.image.imageNames.engine }}
+        {{- else }}
+        image: {{ template "snorkelflow.registryPrefix" . }}snorkelai/engine:{{ .Values.version }}-cuda
+        {{- end }}
+        {{- if .Values.image.imagePullPolicy }}
+        imagePullPolicy: {{ .Values.image.imagePullPolicy }}
+        {{- end }}
+        name: ray-gpu-worker
+        {{- if .Values.services.rayGpuWorker.containerSecurityContext }}
+        securityContext:
+          {{- toYaml .Values.services.rayGpuWorker.containerSecurityContext | nindent 10 }}
+        {{- end }}
+        args:
+        - ray-worker
+        - --ray-head-port=7379
+        - --enable-gpu=True
+        ports: []
+        volumeMounts:
+        - mountPath: /tmp
+          name: empty-dir
+          subPath: tmp-dir
+        - mountPath: /var/log
+          name: empty-dir
+          subPath: log-dir
+        - mountPath: /data
+          name: data
+        - mountPath: /etc/auth/jwt
+          name: jwt-key-pub
+        - mountPath: /dev/shm
+          name: dshm
+{{- if .Values.services.rayGpuWorker.secretsFromFile }}
+        - mountPath: /etc/secrets/db-secret
+          name: db-secret-volume
+          readOnly: true
+        - name: minio-secret-volume
+          mountPath: /etc/secrets/minio-secret
+          readOnly: true
+        {{- if .Values.influx_cloud_key}}
+        - name: influxdb-cloud-secret-volume
+          mountPath: /etc/secrets/influxdb-cloud-secret
+          readOnly: true
+        {{- end }}
+{{- end }}
+{{- with include "logging.mounts" (deepCopy . | merge (dict "service_type" "ray-gpu-worker")) }}
+{{ . | indent 8 }}
+{{- end }}
+        resources:
+{{- if .Values.services.rayGpuWorker.resources }}
+{{ toYaml .Values.services.rayGpuWorker.resources | indent 10 }}
+{{- else }}
+          requests:
+            memory: 16.0Gi
+            cpu: "1.0"
+            nvidia.com/gpu: '1'
+          limits:
+            memory: 16.0Gi
+            cpu: "1.0"
+            nvidia.com/gpu: '1'
+{{- end }}
+{{- with include "logging.sidecar" (deepCopy . | merge (dict "service_type" "ray-gpu-worker")) }}
+{{ . | indent 6 }}
+{{- end }}
+      volumes:
+      - name: empty-dir
+        emptyDir: {}
+      - name: data
+        persistentVolumeClaim:
+          claimName: {{ template "snorkelflow.pvcName" . }}
+      - name: jwt-key-pub
+        secret:
+          secretName: jwt-key-pub
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 10000Mi
+{{- if .Values.services.rayGpuWorker.secretsFromFile }}
+      - name: db-secret-volume
+        secret:
+          secretName: db-secret
+      - name: minio-secret-volume
+        secret:
+          secretName: minio-secret
+      {{- if .Values.influx_cloud_key}}
+      - name: influxdb-cloud-secret-volume
+        secret:
+          secretName: influxdb-cloud-secret
+      {{- end }}
+{{- end }}
+{{- with include "logging.volumes" (deepCopy . | merge (dict "service_type" "ray-gpu-worker")) }}
+{{ . | indent 6 }}
+{{- end }}
+{{- end }}

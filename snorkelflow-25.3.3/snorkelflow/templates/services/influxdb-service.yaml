@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    service: influxdb
+    project: {{ .Values.projectName }}
+  name: influxdb
+  namespace: {{ .Values.projectName }}
+spec:
+  type: {{ .Values.traffic.ingresses.serviceType }}
+  ports:
+  - name: "8086"
+    port: 8086
+    targetPort: 8086
+  selector:
+    service: influxdb

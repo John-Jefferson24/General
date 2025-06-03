@@ -1,0 +1,87 @@
+{{- if and .Values.services.jupyterhub.enabled .Values.traffic.networkPolicies.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: jupyterhub-network-policy
+  namespace: {{ .Values.projectName }}
+spec:
+  egress:
+  - ports:
+    - port: 53
+      protocol: UDP
+    - port: 53
+      protocol: TCP
+    to: []
+{{- if .Values.traffic.allowInternetAccess}}
+  - to:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+        except:
+        - 192.168.0.0/16
+        - 172.16.0.0/20
+{{- end }}
+  - ports:
+    - port: 8686
+    to:
+    - podSelector:
+        matchLabels:
+          project: {{ .Values.projectName }}
+          service: tdm-api
+  - ports:
+    - port: 8000
+    - port: 8001
+    to:
+    - podSelector:
+        matchLabels:
+          project: {{ .Values.projectName }}
+          service: jupyterhub-proxy
+  - ports:
+    {{- if .Values.services.minio.ui.enabled }}
+    - port: 9000
+    {{- end }}
+    - port: 9001
+    to:
+    - podSelector:
+        matchLabels:
+          project: {{ .Values.projectName }}
+          service: minio
+  - ports:
+    - port: 8484
+    to:
+    - podSelector:
+        matchLabels:
+          project: {{ .Values.projectName }}
+          service: studio-api
+  - ports:
+    - port: 8186
+    to:
+    - podSelector:
+        matchLabels:
+          project: {{ .Values.projectName }}
+          service: telegraf
+  - ports:
+    - port: 8888
+    to:
+    - podSelector:
+        matchLabels:
+          app: jupyterhub
+          component: singleuser-server
+          release: jupyterhub
+  ingress:
+  - from: []
+    ports:
+    - port: 8081
+  - from:
+    - podSelector:
+        matchLabels:
+          hub.jupyter.org/network-access-hub: 'true'
+    ports:
+    - port: 8081
+  podSelector:
+    matchLabels:
+      project: {{ .Values.projectName }}
+      service: jupyterhub
+  policyTypes:
+  - Ingress
+  - Egress
+{{- end }}

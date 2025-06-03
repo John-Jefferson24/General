@@ -1,0 +1,19 @@
+{{- if ne .Values.observability.logging_stack "LEGACY" }}
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    project: {{ .Values.projectName }}
+    service: vector
+  name: vector
+  namespace: {{ .Values.projectName }}
+spec:
+  ports:
+  - name: vector
+    port: 6000
+    protocol: TCP
+  selector:
+    service: vector
+    project: {{ .Values.projectName }}
+  type: ClusterIP
+{{- end }}

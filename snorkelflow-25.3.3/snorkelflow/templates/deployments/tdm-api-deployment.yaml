@@ -1,0 +1,426 @@
+{{- $images := .Files.Get "images.json" | fromJson }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    always-pinned: "0"
+    service: tdm-api
+    project: {{ .Values.projectName }}
+    snorkel.ai/compute-type: cpu
+{{- if or  .Values.services.tdmApi.labels .Values.services.labels }}
+{{ toYaml (merge .Values.services.tdmApi.labels .Values.services.labels) | indent 4 }}
+{{- end }}
+  name: tdm-api
+  namespace: {{ .Values.projectName }}
+spec:
+  strategy:
+    type: Recreate
+  replicas: 1
+{{- if .Values.services.progressDeadlineSeconds }}
+  progressDeadlineSeconds: {{ .Values.services.progressDeadlineSeconds }}
+{{- end }}
+  selector:
+    matchLabels:
+      service: tdm-api
+      project: {{ .Values.projectName }}
+  template:
+    metadata:
+      labels:
+        always-pinned: "0"
+        service: tdm-api
+        project: {{ .Values.projectName }}
+        snorkel.ai/compute-type: cpu
+{{- if or .Values.services.tdmApi.labels .Values.services.labels }}
+{{ toYaml (merge .Values.services.tdmApi.labels .Values.services.labels) | indent 8 }}
+{{- end }}
+    spec:
+{{- if or .Values.affinity.binPackAlwaysPinnedPods .Values.affinity.nodeAffinity }}
+      affinity:
+        {{- if .Values.affinity.binPackAlwaysPinnedPods }}
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: always-pinned
+                operator: In
+                values:
+                - "1"
+            topologyKey: kubernetes.io/hostname
+            namespaceSelector: {}
+        {{- end }}
+        {{- with .Values.affinity.nodeAffinity }}
+        nodeAffinity:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+{{- end }}
+      {{- with .Values.affinity.nodeSelectors }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      imagePullSecrets:
+        - name: {{ .Values.image.imagePullSecret | default "regcred" }}
+      securityContext:
+        runAsUser: 99
+        fsGroup: 99
+      serviceAccountName: snorkelflow-internal-k8s-rw-sa
+      containers:
+      - env:
+        - name: SERVICE_TYPE
+          value: tdm-api
+        - name: HF_HOME
+          value: "/tmp/snorkel-pretrained-models"
+        - name: SNORKEL_FLOW_VERSION
+          value: "{{ .Values.version }}"
+{{- if not .Values.services.jupyterhub.enabled }}
+        - name: NOTEBOOK_API_KEY
+          value: {{ default "36380ba0-965b-44f6-95c5-01dc7a8ec608" .Values.services.notebook.notebookApiKey }}
+{{- end }}
+        - name: NOTEBOOK_TYPE
+{{- if .Values.services.jupyterhub.enabled }}
+          value: JUPYTERHUB
+{{- else }}
+          value: LEGACY
+{{- end }}
+        - name: MINIO_IP
+          value: {{ .Values.traffic.ingresses.services.minio.urlPrefix }}.{{ .Values.traffic.ingresses.domain }}
+        - name: MINIO_INGRESS_PORT
+          value: '80'
+        - name: MINIO_TLS_INGRESS_PORT
+          value: '443'
+        - name: DB_MINCONN
+          value: "128"
+        - name: DB_MAXCONN
+          value: "256"
+        - name: SSO_HOST_IP
+          value: {{ .Values.traffic.ingresses.services.snorkelflow.urlPrefix }}.{{ .Values.traffic.ingresses.domain }}
+        - name: ENABLE_IPV6
+          value: "False"
+        - name: ENABLE_PRETRAINED_MODEL_DIRECTORY
+          value: {{ .Values.pretrained_models.enabled | toString | title | quote }}
+{{- if .Values.authentication.jwt.enabled }}
+        - name: SSO_ENABLE_JWT_LOGIN
+          value: "{{ .Values.authentication.jwt.enabled }}"
+{{- else }}
+        - name: SSO_ENABLE_JWT_LOGIN
+          value: "False"
+{{- end }}
+{{- if .Values.authorization.adRoles.enabled }}
+        - name: SSO_ENABLE_AD_ROLES_UPDATE
+          value: "{{ .Values.authorization.adRoles.enabled }}"
+{{- end }}
+{{- if and .Values.authorization.adRoles.enabled .Values.authorization.adRoles.oidc.claim }}
+        - name: SSO_AD_ROLES_CLAIM
+          value: "{{ .Values.authorization.adRoles.oidc.claim }}"
+{{- end }}
+{{- if and .Values.authorization.adRoles.enabled .Values.authorization.adRoles.oidc.prefix }}
+        - name: SSO_AD_ROLES_PREFIX
+          value: "{{ .Values.authorization.adRoles.oidc.prefix }}"
+{{- end }}
+{{- if and .Values.authorization.adRoles.enabled .Values.authorization.adRoles.oidc.separator }}
+        - name: SSO_AD_ROLES_SEPARATOR
+          value: "{{ .Values.authorization.adRoles.oidc.separator }}"
+{{- end }}
+{{- if and .Values.authorization.adRoles.enabled .Values.authorization.adRoles.saml.attributeName }}
+        - name: SSO_AD_ROLES_ATTRIBUTE_NAME
+          value: "{{ .Values.authorization.adRoles.saml.attributeName }}"
+{{- end }}
+{{- if and .Values.authorization.adRoles.enabled .Values.authorization.adRoles.saml.prefix }}
+        - name: SSO_AD_ROLES_PREFIX
+          value: "{{ .Values.authorization.adRoles.saml.prefix }}"
+{{- end }}
+{{- if and .Values.authorization.adRoles.enabled .Values.authorization.adRoles.saml.separator }}
+        - name: SSO_AD_ROLES_SEPARATOR
+          value: "{{ .Values.authorization.adRoles.saml.separator }}"
+{{- end }}
+{{- if and .Values.authentication.jwt.enabled .Values.authentication.jwt.deployment }}
+        - name: SNORKEL_IP_DEPLOYMENT
+          value: "{{ .Values.authentication.jwt.deployment }}"
+{{- end }}
+        - name: RAY_HEAD_URL
+          value: "ray://ray-head:10001"
+        - name: SEPARATE_GPU_PODS
+          value: {{ if .Values.gpu.separate_gpu_pods }}"1"{{ else }}"0"{{ end }}
+        - name: RAY_HEAD_REDIS_PORT
+          value: "7379"
+        - name: NUM_WORKERS_TINY
+          value: "4"
+        - name: NUM_WORKERS_SMALL
+          value: "4"
+        - name: NUM_WORKERS_LARGE
+          value: "1"
+        - name: NUM_WORKERS_MODEL_SMALL
+          value: "4"
+        - name: NUM_WORKERS_MODEL_LARGE
+          value: "1"
+{{- if .Values.traffic.basePath }}
+        - name: BASE_PATH
+          value: "{{ .Values.traffic.basePath }}"
+{{- else }}
+        - name: BASE_PATH
+          value: ""
+{{- end }}
+        - name: ARROW_CACHE_ENABLED
+          value: {{ if .Values.optimizations.arrow_cache.enabled }}"1"{{ else }}"0"{{ end }}
+        - name: LD_PRELOAD
+          value: /usr/lib/x86_64-linux-gnu/libjemalloc.so.2
+        - name: MALLOC_CONF
+          value: background_thread:true
+        - name: MALLOC_MMAP_THRESHOLD_
+          value: "16384"
+        - name: CUPY_CACHE_DIR
+          value: /var/lib/snorkel/.cupy-cache
+        - name: USE_PREFECT
+          value: {{ if .Values.prefect.enabled }}"1"{{ else }}"0"{{ end }}
+        - name: MODEL_TRAINER_REPLICA_DEFAULT_COUNT
+          value: {{ .Values.services.modelTrainer.max_replicas | quote }}
+        - name: ENGINE_REPLICA_DEFAULT_COUNT
+          value: {{ .Values.services.engine.max_replicas | quote }}
+        - name: RAY_WORKER_REPLICA_DEFAULT_COUNT
+          value: {{ .Values.services.rayWorker.max_replicas | quote }}
+        - name: RAY_GPU_WORKER_REPLICA_DEFAULT_COUNT
+          value: {{ .Values.services.rayGpuWorker.max_replicas | quote }}
+        - name: MODEL_TRAINER_REPLICA_MIN_COUNT
+          value: {{ .Values.services.modelTrainer.min_replicas | quote }}
+        - name: ENGINE_REPLICA_MIN_COUNT
+          value: {{ .Values.services.engine.min_replicas | quote }}
+        - name: RAY_WORKER_REPLICA_MIN_COUNT
+          value: {{ .Values.services.rayWorker.min_replicas | quote }}
+        - name: RAY_GPU_WORKER_REPLICA_MIN_COUNT
+          value: {{ .Values.services.rayGpuWorker.min_replicas | quote }}
+{{- if eq .Values.autoscaling.worker_autoscaling "1" }}
+        - name: POD_AUTOSCALING_ENABLED
+          value: "1"
+{{- else }}
+        - name: POD_AUTOSCALING_ENABLED
+          value: "0"
+{{- end }}
+{{- if eq .Values.autoscaling.cluster_autoscaling.pod_disruption_budget_toggling "1" }}
+        - name: PDB_TOGGLING_ENABLED
+          value: "1"
+{{- else }}
+        - name: PDB_TOGGLING_ENABLED
+          value: "0"
+{{- end }}
+        - name: BUSINESS_HOUR_START_UTC
+          value: {{ .Values.autoscaling.cluster_autoscaling.business_hour_start_utc | quote }}
+        - name: BUSINESS_HOUR_END_UTC
+          value: {{ .Values.autoscaling.cluster_autoscaling.business_hour_end_utc | quote}}
+        - name: LOGGING_STACK
+          value: {{ .Values.observability.logging_stack }}
+        - name: SNORKELFLOW_MOUNT_DIR
+          value: /data
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: REDIS_URL
+          value: redis
+        - name: MINIO_URL
+          value: http://minio:9001
+{{- if .Values.services.tdmApi.secretsFromFile }}
+        - name: TDM_CONN_STR_FILE
+          value: /etc/secrets/db-secret/tdm_conn_str
+{{- else }}
+        - name: TDM_CONN_STR
+          valueFrom:
+            secretKeyRef:
+              name: db-secret
+              key: tdm_conn_str
+{{- end }}
+        - name: INFLUXDB_V2_URL
+          value: http://influxdb:8086
+        - name: TELEGRAF_CADVISOR_URL
+          value: telegraf:8186
+        - name: TELEGRAF_URL
+          value: http://telegraf:8125
+{{- if not .Values.services.jupyterhub.enabled }}
+        - name: NOTEBOOK_URL
+          value: http://notebook:8282
+{{- end }}
+        - name: AUTHORIZATION_API_URL
+          value: http://authorization-api:31314
+{{- if .Values.services.tdmApi.secretsFromFile }}
+        - name: INFLUXDB_ACCESS_KEY_FILE
+          value: /etc/secrets/influxdb-secret/influxdb_access_key
+        - name: INFLUXDB_BUCKET_FILE
+          value: /etc/secrets/influxdb-secret/influxdb_bucket
+{{- else }}
+        - name: INFLUXDB_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: influxdb-secret
+              key: influxdb_access_key
+        - name: INFLUXDB_BUCKET
+          valueFrom:
+            secretKeyRef:
+              name: influxdb-secret
+              key: influxdb_bucket
+{{- end }}
+{{- if .Values.services.jupyterhub.enabled }}
+{{- if .Values.services.tdmApi.secretsFromFile }}
+        - name: JUPYTERHUB_OAUTH_CLIENT_SECRET_FILE
+          value: /etc/secrets/jupyterhub-oidc-secret/client_secret
+{{- else }}
+        - name: JUPYTERHUB_OAUTH_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: jupyterhub-oidc-secret
+              key: client_secret
+{{- end }}
+{{- end }}
+{{- if .Values.services.tdmApi.secretsFromFile }}
+        - name: PREFECT_API_DATABASE_CONNECTION_URL_FILE
+          value: /etc/secrets/db-prefect-secret/prefect_db_conn_url
+{{- else }}
+        - name: PREFECT_API_DATABASE_CONNECTION_URL
+          valueFrom:
+            secretKeyRef:
+              name: db-prefect-secret
+              key: prefect_db_conn_url
+{{- end }}
+{{- with include "launchDarkly.envVars" . }}
+{{ . | indent 8 }}
+{{- end }}
+{{- if .Values.authentication.oidc.enabled }}
+        envFrom:
+        - configMapRef:
+            name: oidc-configmap
+{{- end }}
+{{- range $k, $v := (merge .Values.services.tdmApi.env .Values.services.env) }}
+        - name: {{ $k }}
+          value: {{ $v | toString | quote }}
+{{- end }}
+        args:
+        - --port
+        - "8686"
+        - --host
+        - 0.0.0.0
+        {{- if .Values.image.imageNames.tdm }}
+        image: {{ .Values.image.imageNames.tdm }}
+        {{- else if .Values.gpu.enabled }}
+        image: {{ template "snorkelflow.registryPrefix" . }}snorkelai/tdm-api:{{ .Values.version }}-cuda
+        {{- else }}
+        image: {{ template "snorkelflow.registryPrefix" . }}snorkelai/tdm-api:{{ .Values.version }}
+        {{- end }}
+        {{- if .Values.image.imagePullPolicy }}
+        imagePullPolicy: {{ .Values.image.imagePullPolicy }}
+        {{- end }}
+        name: tdm-api
+        {{- if .Values.services.tdmApi.containerSecurityContext }}
+        securityContext:
+          {{- toYaml .Values.services.tdmApi.containerSecurityContext | nindent 10 }}
+        {{- end }}
+        ports:
+        - containerPort: 8686
+        volumeMounts:
+        - mountPath: /tmp
+          name: empty-dir
+          subPath: tmp-dir
+        - mountPath: /var/log
+          name: empty-dir
+          subPath: log-dir
+        - mountPath: /data
+          name: data
+        - mountPath: /etc/auth/jwt
+          name: jwt-key-pub
+        - mountPath: /etc/auth/jwt_priv
+          name: jwt-key
+        - mountPath: /etc/auth/sso
+          name: sso-key-cert
+        - mountPath: /etc/auth/sso_priv
+          name: sso-key
+{{- if .Values.services.tdmApi.secretsFromFile }}
+{{- if .Values.services.jupyterhub.enabled }}
+        - mountPath: /etc/secrets/jupyterhub-oidc-secret
+          name: jupyterhub-oidc-secret-volume
+          readOnly: true
+{{- end }}
+        - mountPath: /etc/secrets/influxdb-secret
+          name: influxdb-secret-volume
+          readOnly: true
+        - mountPath: /etc/secrets/db-secret
+          name: db-secret-volume
+          readOnly: true
+        - mountPath: /etc/secrets/db-prefect-secret
+          name: db-prefect-secret-volume
+          readOnly: true
+{{- end }}
+{{- with include "logging.mounts" (deepCopy . | merge (dict "service_type" "tdm-api")) }}
+{{ . | indent 8 }}
+{{- end }}
+        resources:
+{{- if .Values.services.tdmApi.resources }}
+{{ toYaml .Values.services.tdmApi.resources | indent 10 }}
+{{- else }}
+          requests:
+            memory: 16.0Gi
+            cpu: "4.0"
+          limits:
+            memory: 16.0Gi
+            cpu: "4.0"
+{{- end }}
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 8686
+          initialDelaySeconds: 3
+          periodSeconds: 30
+        startupProbe:
+          httpGet:
+            path: /
+            port: 8686
+          periodSeconds: 30
+          failureThreshold: 240
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 8686
+          periodSeconds: 30
+{{- with include "logging.sidecar" (deepCopy . | merge (dict "service_type" "tdm-api")) }}
+{{ . | indent 6 }}
+{{- end }}
+      volumes:
+      - name: empty-dir
+        emptyDir: {}
+      - name: data
+        persistentVolumeClaim:
+          claimName: {{ template "snorkelflow.pvcName" . }}
+      - name: jwt-key-pub
+        secret:
+          secretName: jwt-key-pub
+      - name: jwt-key
+        secret:
+          secretName: jwt-key
+      - name: sso-key-cert
+        secret:
+          secretName: sso-key-cert
+      - name: sso-key
+        secret:
+          secretName: sso-key
+{{- if .Values.services.tdmApi.secretsFromFile }}
+{{- if .Values.services.jupyterhub.enabled }}
+      - name: jupyterhub-oidc-secret-volume
+        secret:
+          secretName: jupyterhub-oidc-secret
+{{- end }}
+      - name: influxdb-secret-volume
+        secret:
+          secretName: influxdb-secret
+      - name: db-secret-volume
+        secret:
+          secretName: db-secret
+      - name: db-prefect-secret-volume
+        secret:
+          secretName: db-prefect-secret
+{{- end }}
+{{- with include "logging.volumes" (deepCopy . | merge (dict "service_type" "tdm-api")) }}
+{{ . | indent 6 }}
+{{- end }}

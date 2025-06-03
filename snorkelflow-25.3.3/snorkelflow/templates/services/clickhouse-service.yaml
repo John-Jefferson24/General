@@ -1,0 +1,28 @@
+{{- if ne .Values.observability.logging_stack "LEGACY" }}
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    project: {{ .Values.projectName }}
+    service: clickhouse
+  name: clickhouse
+  namespace: {{ .Values.projectName }}
+spec:
+  ports:
+  - name: http
+    port: 8123
+    protocol: TCP
+  - name: native
+    port: 9000
+    protocol: TCP
+  - name: grpc
+    port: 9100
+    protocol: TCP
+  - name: prometheus
+    port: 9363
+    protocol: TCP
+  selector:
+    service: clickhouse
+    project: {{ .Values.projectName }}
+  type: ClusterIP
+{{- end }}

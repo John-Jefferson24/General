@@ -1,0 +1,161 @@
+{{- $images := .Files.Get "images.json" | fromJson }}
+{{- if .Values.services.jupyterhub.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    hub.jupyter.org/network-access-hub: 'true'
+    hub.jupyter.org/network-access-singleuser: 'true'
+    always-pinned: "0"
+    project: {{ .Values.projectName }}
+    service: jupyterhub-proxy
+    snorkel.ai/compute-type: cpu
+{{- if or .Values.services.jupyterhubProxy.labels .Values.services.labels }}
+{{ toYaml (merge .Values.services.jupyterhubProxy.labels .Values.services.labels) | indent 4 }}
+{{- end }}
+  name: jupyterhub-proxy
+  namespace: {{ .Values.projectName }}
+spec:
+  replicas: 1
+{{- if .Values.services.progressDeadlineSeconds }}
+  progressDeadlineSeconds: {{ .Values.services.progressDeadlineSeconds }}
+{{- end }}
+  selector:
+    matchLabels:
+      hub.jupyter.org/network-access-hub: 'true'
+      hub.jupyter.org/network-access-singleuser: 'true'
+      project: {{ .Values.projectName }}
+      service: jupyterhub-proxy
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        hub.jupyter.org/network-access-hub: 'true'
+        hub.jupyter.org/network-access-singleuser: 'true'
+        always-pinned: "0"
+        project: {{ .Values.projectName }}
+        service: jupyterhub-proxy
+        snorkel.ai/compute-type: cpu
+{{- if or .Values.services.jupyterhubProxy.labels .Values.services.labels }}
+{{ toYaml (merge .Values.services.jupyterhubProxy.labels .Values.services.labels) | indent 8 }}
+{{- end }}
+    spec:
+{{- if or .Values.affinity.binPackAlwaysPinnedPods .Values.affinity.nodeAffinity }}
+      affinity:
+        {{- if .Values.affinity.binPackAlwaysPinnedPods }}
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: always-pinned
+                operator: In
+                values:
+                - "1"
+            topologyKey: kubernetes.io/hostname
+            namespaceSelector: {}
+        {{- end }}
+        {{- with .Values.affinity.nodeAffinity }}
+        nodeAffinity:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+{{- end }}
+      {{- with .Values.affinity.nodeSelectors }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+      - args:
+        - configurable-http-proxy
+        - --ip=
+        - --api-ip=
+        - --api-port=8001
+        - --default-target=http://jupyterhub:$(HUB_SERVICE_PORT)
+        - --error-target=http://jupyterhub:$(HUB_SERVICE_PORT)/hub/error
+        - --port=8000
+{{- if and .Values.traffic.istio.enabled ((.Values.traffic.istio).mtls).enabled }}
+        - --change-origin # This is required for the strict mTLS mode with Istio
+{{- end }}
+        env:
+        - name: SERVICE_TYPE
+          value: jupyterhub-proxy
+        - name: SNORKEL_FLOW_VERSION
+          value: "{{ .Values.version }}"
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+{{- if .Values.services.jupyterhubProxy.secretsFromFile }}
+{{- /*
+  # CONFIGPROXY_AUTH_TOKEN_FILE is suppoted since this PR:
+  # https://github.com/jupyterhub/configurable-http-proxy/pull/209.
+*/}}
+        - name: CONFIGPROXY_AUTH_TOKEN_FILE
+          value: /usr/local/etc/jupyterhub/secret/hub.config.ConfigurableHTTPProxy.auth_token
+{{- else }}
+        - name: CONFIGPROXY_AUTH_TOKEN
+          valueFrom:
+            secretKeyRef:
+              key: hub.config.ConfigurableHTTPProxy.auth_token
+              name: jupyterhub-secret-secret
+{{- end }}
+{{- if and .Values.traffic.istio.enabled ((.Values.traffic.istio).mtls).enabled }}
+        - name: IS_ISTIO_STRICT_MTLS_ENABLED
+          value: "True"
+{{- end }}
+{{- range $k, $v := (merge .Values.services.jupyterhubProxy.env .Values.services.env) }}
+        - name: {{ $k }}
+          value: {{ $v | toString | quote }}
+{{- end }}
+        {{- if .Values.image.imageNames.jupyterhubProxy }}
+        image: {{ .Values.image.imageNames.jupyterhubProxy }}
+        {{- else }}
+        image: {{ template "snorkelflow.registryPrefix" . }}{{ $images.docker_hub_repo }}/{{ get $images.custom_images "jupyterhub-proxy" }}
+        {{- end }}
+        name: jupyterhub-proxy
+        {{- if .Values.services.jupyterhubProxy.containerSecurityContext }}
+        securityContext:
+          {{- toYaml .Values.services.jupyterhubProxy.containerSecurityContext | nindent 10 }}
+        {{- end }}
+        ports:
+        - containerPort: 8000
+        - containerPort: 8001
+        resources:
+{{- if .Values.services.jupyterhubProxy.resources }}
+{{ toYaml .Values.services.jupyterhubProxy.resources | indent 10 }}
+{{- else }}
+          requests:
+            memory: 1.5Gi
+            cpu: "1.0"
+          limits:
+            memory: 1.5Gi
+            cpu: "1.0"
+{{- end }}
+{{- if .Values.services.jupyterhubProxy.secretsFromFile }}
+        volumeMounts:
+        - mountPath: /usr/local/etc/jupyterhub/secret
+          name: jupyterhub-secret-volume
+          readOnly: true
+{{- end }}
+      securityContext:
+        runAsUser: 99
+      serviceAccountName: jupyterhub-sa
+      imagePullSecrets:
+        - name: {{ .Values.image.imagePullSecret | default "regcred" }}
+{{- if .Values.services.jupyterhubProxy.secretsFromFile }}
+      volumes:
+      - name: jupyterhub-secret-volume
+        secret:
+          secretName: jupyterhub-secret-secret
+{{- else }}
+      volumes: []
+{{- end }}
+{{- end }}

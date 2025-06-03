@@ -1,0 +1,120 @@
+{{- if .Values.traffic.networkPolicies.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: envoy-front-proxy-network-policy
+  namespace: {{ .Values.projectName }}
+spec:
+  podSelector:
+    matchLabels:
+      project: {{ .Values.projectName }}
+      service: envoy-front-proxy
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+{{- if .Values.traffic.allowAllInboundTrafficOnKeyServices}}
+  - from: []
+    # Allow ingress from ingress controller/nodeport
+    ports:
+    - port: 1080
+{{- end}}
+{{- range $rule := .Values.traffic.networkPolicies.ingresses }}
+  - from:
+{{ toYaml $rule.from | indent 4}}
+    ports:
+      port: 1080
+{{- end }}
+  - from:
+      - podSelector:
+          matchLabels:
+            project: {{ .Values.projectName }}
+            service: telegraf
+    ports:
+    - port: 9901
+  egress:
+  - to: []
+    # Allow DNS resolution
+    ports:
+    - port: 53
+      protocol: UDP
+    - port: 53
+      protocol: TCP
+  - to:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+        except:
+        - 192.168.0.0/16
+        - 172.16.0.0/20
+  - to:
+    - podSelector:
+        matchLabels:
+          project: {{ .Values.projectName }}
+          service: tdm-api
+    ports:
+    - port: 8686
+  - to:
+    - podSelector:
+        matchLabels:
+          project: {{ .Values.projectName }}
+          service: storage-api
+    ports:
+    - port: 31315
+  - to:
+    - podSelector:
+        matchLabels:
+          project: {{ .Values.projectName }}
+          service: studio-api
+    ports:
+    - port: 8484
+{{- if not .Values.services.jupyterhub.enabled }}
+  - to:
+    - podSelector:
+        matchLabels:
+          project: {{ .Values.projectName }}
+          service: notebook
+    ports:
+    - port: 8888
+    - port: 8282
+{{- end }}
+  - to:
+    - podSelector:
+        matchLabels:
+          project: {{ .Values.projectName }}
+          service: minio
+    ports:
+    {{- if .Values.services.minio.ui.enabled }}
+    - port: 9000
+    {{- end }}
+    - port: 9001
+  - to:
+    - podSelector:
+        matchLabels:
+          project: {{ .Values.projectName }}
+          service: grafana
+    ports:
+    - port: 3000
+{{- if .Values.services.jupyterhub.enabled }}
+  - to:
+    - podSelector:
+        matchLabels:
+          project: {{ .Values.projectName }}
+          service: jupyterhub-proxy
+    ports:
+    - port: 8000
+{{- end }}
+  - to:
+    - podSelector:
+        matchLabels:
+          project: {{ .Values.projectName }}
+          service: flow-ui
+    ports:
+    - port: 5000
+  - to:
+    - podSelector:
+        matchLabels:
+          project: {{ .Values.projectName }}
+          service: telegraf
+    ports:
+    - port: 8186
+{{- end }}

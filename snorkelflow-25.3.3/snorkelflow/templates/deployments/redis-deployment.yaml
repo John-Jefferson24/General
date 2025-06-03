@@ -1,0 +1,129 @@
+{{- $images := .Files.Get "images.json" | fromJson }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    always-pinned: "1"
+    service: redis
+    project: {{ .Values.projectName }}
+    snorkel.ai/compute-type: cpu
+{{- if or .Values.services.redis.labels .Values.services.labels }}
+{{ toYaml (merge .Values.services.redis.labels .Values.services.labels) | indent 4 }}
+{{- end }}
+  name: redis
+  namespace: {{ .Values.projectName }}
+spec:
+  strategy:
+    type: Recreate
+  replicas: 1
+{{- if .Values.services.progressDeadlineSeconds }}
+  progressDeadlineSeconds: {{ .Values.services.progressDeadlineSeconds }}
+{{- end }}
+  selector:
+    matchLabels:
+      service: redis
+      project: {{ .Values.projectName }}
+  template:
+    metadata:
+      labels:
+        always-pinned: "1"
+        service: redis
+        project: {{ .Values.projectName }}
+        snorkel.ai/compute-type: cpu
+{{- if or .Values.services.redis.labels .Values.services.labels}}
+{{ toYaml (merge .Values.services.redis.labels .Values.services.labels) | indent 8 }}
+{{- end }}
+    spec:
+{{- if or .Values.affinity.binPackAlwaysPinnedPods .Values.affinity.nodeAffinity }}
+      affinity:
+        {{- if .Values.affinity.binPackAlwaysPinnedPods }}
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: always-pinned
+                operator: In
+                values:
+                - "0"
+            topologyKey: kubernetes.io/hostname
+            namespaceSelector: {}
+        {{- end }}
+        {{- with .Values.affinity.nodeAffinity }}
+        nodeAffinity:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+{{- end }}
+      {{- with .Values.affinity.nodeSelectors }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      imagePullSecrets:
+        - name: {{ .Values.image.imagePullSecret | default "regcred" }}
+      securityContext:
+        runAsUser: 99
+        fsGroup: 99
+      serviceAccountName: snorkelflow-sa
+      volumes:
+      - name: redis
+        persistentVolumeClaim:
+          claimName: {{ .Values.projectName }}-redis
+      - name: empty-dir
+        emptyDir: {}
+      containers:
+      {{- if .Values.image.imageNames.redis }}
+      - image: {{ .Values.image.imageNames.redis }}
+      {{- else }}
+      - image: {{ template "snorkelflow.registryPrefix" . }}{{ $images.docker_hub_repo }}/{{ get $images.custom_images "redis" }}
+      {{- end }}
+        name: redis
+        {{- if .Values.services.redis.containerSecurityContext }}
+        securityContext:
+          {{- toYaml .Values.services.redis.containerSecurityContext | nindent 10 }}
+        {{- end }}
+        ports:
+          - containerPort: 6379
+        env:
+        - name: SERVICE_TYPE
+          value: redis
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: TELEGRAF_CADVISOR_URL
+          value: telegraf:8186
+{{- range $k, $v := (merge .Values.services.redis.env .Values.services.env) }}
+        - name: {{ $k }}
+          value: {{ $v | toString | quote }}
+{{- end }}
+        args:
+        - redis-server
+        - --dir
+        - "/var/lib/redis/data"
+        - --save
+        - "60"
+        - "1"
+        resources:
+{{- if .Values.services.redis.resources }}
+{{ toYaml .Values.services.redis.resources | indent 10 }}
+{{- else }}
+          requests:
+            memory: 4.0Gi
+            cpu: "1.0"
+          limits:
+            memory: 4.0Gi
+            cpu: "1.0"
+{{- end }}
+        volumeMounts:
+        - mountPath: /var/lib/redis/data
+          name: redis
+        - mountPath: /var/log
+          name: empty-dir
+          subPath: log-dir

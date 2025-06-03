@@ -1,0 +1,175 @@
+{{- $images := .Files.Get "images.json" | fromJson }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    always-pinned: "0"
+    service: telegraf
+    project: {{ .Values.projectName }}
+    snorkel.ai/compute-type: cpu
+{{- if or .Values.services.telegraf.labels .Values.services.labels }}
+{{ toYaml (merge .Values.services.telegraf.labels .Values.services.labels) | indent 4 }}
+{{- end }}
+  name: telegraf
+  namespace: {{ .Values.projectName }}
+spec:
+  strategy:
+    type: Recreate
+  replicas: 1
+{{- if .Values.services.progressDeadlineSeconds }}
+  progressDeadlineSeconds: {{ .Values.services.progressDeadlineSeconds }}
+{{- end }}
+  selector:
+    matchLabels:
+      service: telegraf
+      project: {{ .Values.projectName }}
+  template:
+    metadata:
+      labels:
+        always-pinned: "0"
+        service: telegraf
+        project: {{ .Values.projectName }}
+        snorkel.ai/compute-type: cpu
+{{- if or .Values.services.telegraf.labels .Values.services.labels }}
+{{ toYaml (merge .Values.services.telegraf.labels .Values.services.labels) | indent 8 }}
+{{- end }}
+    spec:
+{{- if or .Values.affinity.binPackAlwaysPinnedPods .Values.affinity.nodeAffinity }}
+      affinity:
+        {{- if .Values.affinity.binPackAlwaysPinnedPods }}
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: always-pinned
+                operator: In
+                values:
+                - "1"
+            topologyKey: kubernetes.io/hostname
+            namespaceSelector: {}
+        {{- end }}
+        {{- with .Values.affinity.nodeAffinity }}
+        nodeAffinity:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+{{- end }}
+      {{- with .Values.affinity.nodeSelectors }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      imagePullSecrets:
+        - name: {{ .Values.image.imagePullSecret | default "regcred" }}
+      securityContext:
+        runAsUser: 99
+        fsGroup: 99
+      serviceAccountName: snorkelflow-sa
+      containers:
+      - env:
+        - name: SERVICE_TYPE
+          value: telegraf
+        - name: TELEGRAF_CADVISOR_URL
+          value: localhost:8186
+        - name: POD_NAME
+          valueFrom:
+           fieldRef:
+             fieldPath: metadata.name
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+{{- if not .Values.services.telegraf.secretsFromFile }}
+{{- /*
+        # When using file-based secrets, these environment variables can be omitted.
+        # Instead, use telgraf secret-stores support in telegraf configmap.
+        # Reference: https://www.influxdata.com/blog/storing-secrets-telegraf
+*/}}
+        - name: TDM_CONN_STR
+          valueFrom:
+            secretKeyRef:
+              name: db-secret
+              key: tdm_conn_str
+{{- end }}
+        - name: REDIS_URL
+          value: redis
+        - name: TDM_API_URL
+          value: http://tdm-api:8686
+        - name: ENVOY_FRONT_PROXY_URL
+          value: http://envoy-front-proxy:9901
+        - name: INFLUXDB_V2_URL
+          value: http://influxdb:8086
+{{- if not .Values.services.telegraf.secretsFromFile }}
+        - name: INFLUXDB_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: influxdb-secret
+              key: influxdb_access_key
+        - name: INFLUXDB_BUCKET
+          valueFrom:
+            secretKeyRef:
+              name: influxdb-secret
+              key: influxdb_bucket
+{{- end }}
+{{- range $k, $v := (merge .Values.services.telegraf.env .Values.services.env) }}
+        - name: {{ $k }}
+          value: {{ $v | toString | quote }}
+{{- end }}
+        {{- if .Values.image.imageNames.telegraf }}
+        image: {{ .Values.image.imageNames.telegraf }}
+        {{- else }}
+        image: {{ template "snorkelflow.registryPrefix" . }}{{ $images.docker_hub_repo }}/{{ get $images.custom_images "telegraf" }}
+        {{- end }}
+        name: telegraf
+        {{- if .Values.services.telegraf.containerSecurityContext }}
+        securityContext:
+          {{- toYaml .Values.services.telegraf.containerSecurityContext | nindent 10 }}
+        {{- end }}
+        ports:
+        - containerPort: 8125
+        - containerPort: 9273
+        - containerPort: 8186
+        volumeMounts:
+        - name: telegraf
+          mountPath: /etc/telegraf
+{{- if .Values.services.telegraf.secretsFromFile }}
+        - name: db-secret-volume
+          mountPath: /etc/secrets/db-secret
+          readOnly: true
+        - name: influxdb-secret-volume
+          mountPath: /etc/secrets/influxdb-secret
+          readOnly: true
+{{- end }}
+        resources:
+{{- if .Values.services.telegraf.resources }}
+{{ toYaml .Values.services.telegraf.resources | indent 10 }}
+{{- else }}
+          requests:
+            memory: 2.0Gi
+            cpu: "1.0"
+          limits:
+            memory: 2.0Gi
+            cpu: "1.0"
+{{- end }}
+        readinessProbe:
+          httpGet:
+            path: /ping
+            port: 8186
+          initialDelaySeconds: 3
+          periodSeconds: 30
+      volumes:
+        - name: empty-dir
+          emptyDir: {}
+        - name: telegraf
+          configMap:
+            name: telegraf
+{{- if .Values.services.telegraf.secretsFromFile }}
+        - name: db-secret-volume
+          secret:
+            secretName: db-secret
+        - name: influxdb-secret-volume
+          secret:
+            secretName: influxdb-secret
+{{- end }}
