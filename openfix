@@ -1,0 +1,213 @@
+# COMPLETE OpenShift Security Context Fixes - All Settings That Cause Issues
+# Based on OpenShift Security Context Constraints (SCC) Documentation
+
+param(
+    [string]$ChartPath = "H:\oc\snorkelflow"
+)
+
+Write-Host "🔧 COMPLETE OpenShift Security Context Fixes..." -ForegroundColor Green
+Write-Host "Chart Path: $ChartPath" -ForegroundColor Yellow
+
+$DeploymentPath = Join-Path $ChartPath "templates"
+
+if (-not (Test-Path $DeploymentPath)) {
+    Write-Host "❌ Templates directory not found: $DeploymentPath" -ForegroundColor Red
+    exit 1
+}
+
+# Get all YAML files recursively
+$YamlFiles = Get-ChildItem -Path $DeploymentPath -Filter "*.yaml" -Recurse
+Write-Host "📁 Found $($YamlFiles.Count) YAML files to process" -ForegroundColor Cyan
+
+# Create backup
+$BackupPath = Join-Path $ChartPath "templates_backup_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
+New-Item -ItemType Directory -Path $BackupPath -Force | Out-Null
+Write-Host "💾 Created backup: $BackupPath" -ForegroundColor Yellow
+
+# Complete list of OpenShift-problematic security context settings
+$SecurityContextSettings = @(
+    # User/Group Identity Settings (OpenShift assigns these automatically)
+    'runAsUser',
+    'runAsGroup', 
+    'uid',
+    'gid',
+    'fsGroup',
+    'supplementalGroups',
+    'runAsNonRoot',
+    
+    # SELinux Settings (OpenShift manages these)
+    'seLinuxOptions',
+    
+    # Privilege Settings (Restricted by default SCC)
+    'privileged',
+    'allowPrivilegeEscalation',
+    
+    # Capabilities (Dropped by default SCC)
+    'capabilities',
+    'addCapabilities',
+    'dropCapabilities',
+    'defaultAddCapabilities',
+    'requiredDropCapabilities',
+    'allowedCapabilities',
+    
+    # Filesystem Settings (Can cause permission issues)
+    'readOnlyRootFilesystem',
+    'fsGroupChangePolicy',
+    
+    # Host Access Settings (Not allowed in restricted SCC)
+    'hostNetwork',
+    'hostPID',
+    'hostIPC',
+    'hostPorts',
+    
+    # Proc Mount Settings
+    'procMount',
+    
+    # AppArmor Settings  
+    'appArmorProfile',
+    
+    # Seccomp Settings
+    'seccompProfile',
+    
+    # Windows-specific Settings
+    'windowsOptions',
+    
+    # Sysctls Settings
+    'sysctls'
+)
+
+foreach ($file in $YamlFiles) {
+    $relativePath = $file.FullName.Replace($DeploymentPath, "").TrimStart('\')
+    Write-Host "🔧 Processing: $relativePath" -ForegroundColor White
+    
+    # Create backup with directory structure
+    $relativeDir = Split-Path $relativePath -Parent
+    if ($relativeDir) {
+        $backupSubDir = Join-Path $BackupPath $relativeDir
+        New-Item -ItemType Directory -Path $backupSubDir -Force | Out-Null
+    }
+    $backupFilePath = Join-Path $BackupPath $relativePath
+    Copy-Item $file.FullName -Destination $backupFilePath -Force
+    
+    # Read and process content
+    $content = Get-Content $file.FullName
+    $modified = $false
+    
+    for ($i = 0; $i -lt $content.Length; $i++) {
+        $line = $content[$i]
+        
+        # Check each security context setting
+        foreach ($setting in $SecurityContextSettings) {
+            if ($line -match "^\s*$setting\s*:") {
+                $content[$i] = $line -replace "(\s*)($setting\s*:)", '$1# $2'
+                $modified = $true
+                Write-Host "  ↳ Commented out $setting on line $($i+1)" -ForegroundColor Gray
+                break  # Only process one setting per line
+            }
+        }
+        
+        # Handle complete securityContext blocks that only contain restricted settings
+        if ($line -match '^\s*securityContext:\s*$') {
+            $nextNonEmptyLine = $i + 1
+            $hasAllowedSettings = $false
+            $currentIndent = ($line -replace '\S.*').Length
+            
+            # Look ahead to see what's in this securityContext block
+            while ($nextNonEmptyLine -lt $content.Length) {
+                $nextLine = $content[$nextNonEmptyLine]
+                
+                # Skip empty lines
+                if ($nextLine -match '^\s*$') {
+                    $nextNonEmptyLine++
+                    continue
+                }
+                
+                # If we hit a line with same or less indentation, we're out of this block
+                $nextIndent = ($nextLine -replace '\S.*').Length
+                if ($nextIndent -le $currentIndent -and $nextLine -match '\S') {
+                    break
+                }
+                
+                # Check if this securityContext has any allowed settings
+                $hasRestrictedOnly = $true
+                foreach ($setting in $SecurityContextSettings) {
+                    if ($nextLine -match "^\s*$setting\s*:") {
+                        $hasRestrictedOnly = $true
+                        break
+                    }
+                }
+                
+                # If we find any line that's not in our restricted list, keep the securityContext
+                if ($nextLine -match '^\s*\w+\s*:' -and $hasRestrictedOnly) {
+                    $foundRestricted = $false
+                    foreach ($setting in $SecurityContextSettings) {
+                        if ($nextLine -match "^\s*$setting\s*:") {
+                            $foundRestricted = $true
+                            break
+                        }
+                    }
+                    if (-not $foundRestricted) {
+                        $hasAllowedSettings = $true
+                        break
+                    }
+                }
+                
+                $nextNonEmptyLine++
+            }
+            
+            # If securityContext only has restricted settings, comment it out
+            if (-not $hasAllowedSettings) {
+                $content[$i] = $line -replace '(\s*)(securityContext:)', '$1# $2 # OpenShift will handle this automatically'
+                $modified = $true
+                Write-Host "  ↳ Commented out restricted securityContext on line $($i+1)" -ForegroundColor Gray
+            }
+        }
+    }
+    
+    # Write back if modified
+    if ($modified) {
+        $content | Set-Content $file.FullName -Encoding UTF8
+        Write-Host "  ✅ Updated $relativePath" -ForegroundColor Green
+    } else {
+        Write-Host "  ℹ️  No changes needed for $relativePath" -ForegroundColor Blue
+    }
+}
+
+Write-Host ""
+Write-Host "🎉 COMPLETE OpenShift security fixes applied!" -ForegroundColor Green
+Write-Host ""
+Write-Host "📋 All OpenShift-problematic settings removed/commented:" -ForegroundColor Cyan
+
+# Display categorized settings
+Write-Host "  👤 User/Group Identity (OpenShift assigns automatically):" -ForegroundColor Yellow
+Write-Host "     runAsUser, runAsGroup, uid, gid, fsGroup, supplementalGroups" -ForegroundColor White
+
+Write-Host "  🔒 Privilege Settings (Restricted by default SCC):" -ForegroundColor Yellow  
+Write-Host "     privileged, allowPrivilegeEscalation" -ForegroundColor White
+
+Write-Host "  🛡️  Security Labels (OpenShift manages):" -ForegroundColor Yellow
+Write-Host "     seLinuxOptions, appArmorProfile, seccompProfile" -ForegroundColor White
+
+Write-Host "  💾 Filesystem Settings (Can cause permission issues):" -ForegroundColor Yellow
+Write-Host "     readOnlyRootFilesystem, fsGroupChangePolicy" -ForegroundColor White
+
+Write-Host "  🔧 Capabilities (Dropped by default SCC):" -ForegroundColor Yellow
+Write-Host "     capabilities, addCapabilities, dropCapabilities" -ForegroundColor White
+
+Write-Host "  🖥️  Host Access (Not allowed in restricted SCC):" -ForegroundColor Yellow
+Write-Host "     hostNetwork, hostPID, hostIPC, hostPorts" -ForegroundColor White
+
+Write-Host ""
+Write-Host "💾 Backup created at: $BackupPath" -ForegroundColor Yellow
+Write-Host ""
+Write-Host "🚀 Next steps:" -ForegroundColor Magenta
+Write-Host "1. Navigate to chart: cd H:\oc\snorkelflow" -ForegroundColor White
+Write-Host "2. Uninstall existing: helm uninstall snorkelflow -n snorkelflow" -ForegroundColor White
+Write-Host "3. Test template: helm template snorkelflow . | findstr /i ""runAsUser fsGroup privileged""" -ForegroundColor White
+Write-Host "4. Reinstall: helm install snorkelflow . -n snorkelflow --create-namespace" -ForegroundColor White
+Write-Host ""
+Write-Host "🔍 Verify all fixes:" -ForegroundColor Cyan
+Write-Host 'helm template snorkelflow . | Select-String -Pattern "runAsUser|fsGroup|privileged|capabilities" | Where-Object { $_.Line -notmatch "^\s*#" }' -ForegroundColor White
+Write-Host "   (Should return no uncommented security context settings)" -ForegroundColor Gray
+Write-Host ""
+Write-Host "✅ Your Snorkel Flow deployment should now be fully OpenShift compatible!" -ForegroundColor Green
