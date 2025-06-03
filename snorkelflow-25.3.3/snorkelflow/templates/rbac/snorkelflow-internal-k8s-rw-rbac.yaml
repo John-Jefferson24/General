@@ -1,9 +1,0 @@
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-{{- if and .Values.authentication.role.key .Values.authentication.role.value }}
-  annotations:
-    {{ .Values.authentication.role.key }}: {{ .Values.authentication.role.value }}
-{{- end}}
-  name: snorkelflow-internal-k8s-rw-sa
-  namespace: {{ .Values.projectName }}
