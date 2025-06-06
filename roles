@@ -1,7 +1,11 @@
-globalResources: &defaultResources
-  limits:
-    cpu: "1"
-    memory: 2Gi
-  requests:
-    cpu: 500m
-    memory: 1Gi
+clickhouse:
+  # Define non-default resource limits & requests
+  resources:
+    limits:
+      cpu: "2"
+      memory: "4Gi"
+    requests:
+      cpu: "1"
+      memory: "2Gi"
+  env: {}
+  labels: {}
