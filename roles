@@ -1,6 +1,6 @@
 livenessProbe:
   httpGet:
-    path: /v2/health/live
+    path: /health/ready
     port: 9000
   initialDelaySeconds: 10
   periodSeconds: 20
@@ -8,7 +8,7 @@ livenessProbe:
 
 readinessProbe:
   httpGet:
-    path: /v2/health/ready
+    path: /health/ready
     port: 9000
   initialDelaySeconds: 15
   periodSeconds: 10
@@ -18,14 +18,29 @@ readinessProbe:
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
-  name: triton-frontend
+  name: triton-openai-route
+  annotations:
+    # Health check configuration
+    haproxy.router.openshift.io/health_check_interval: "10s"
+    haproxy.router.openshift.io/health_check_uri: "/health/ready"
+    
+    # Traffic management
+    haproxy.router.openshift.io/balance: "roundrobin"
+    haproxy.router.openshift.io/disable_cookies: "true"
+    
+    # Optional: Timeout settings
+    haproxy.router.openshift.io/timeout: "60s"
+    haproxy.router.openshift.io/timeout-tunnel: "1h"
+    
+    # Optional: Health check timeout
+    haproxy.router.openshift.io/health_check_timeout: "5s"
 spec:
-  host: openai-api.example.com  # <--- This will be the Wide IP target
-  path: /v2/health/ready
+  host: api.bank.com
   to:
     kind: Service
-    name: openai-frontend
+    name: triton-openai-service
+    weight: 100
   port:
     targetPort: 9000
   tls:
-    termination: edge           # Use passthrough or reencrypt if using TLS end-to-end
+    termination: edge  # or passthrough/reencrypt as needed
