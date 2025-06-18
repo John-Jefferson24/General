@@ -44,3 +44,25 @@ spec:
     targetPort: 9000
   tls:
     termination: edge  # or passthrough/reencrypt as needed
+
+
+Hi team,
+Quick update on the routing and health check changes I've completed:
+What's been done:
+
+LLaMA 70B model: Set up health checks on port 9000 using /health/ready
+Jina embedding model: Configured two health endpoints - /v2/health/ready and /v2/health/alive
+All necessary route changes have been applied
+
+Next steps - Repository updates:
+We need to add these configurations to our repo to ensure they're properly tracked and deployed:
+
+Update deployment manifests with the new health check endpoints
+Add routing configurations for both models
+This will ensure consistency across all environments and make future deployments smoother
+
+Question about the Wide IP health check requirement:
+There was also a request for Wide IP health checks, and I wanted to clarify my understanding here. From what I know, the Wide IP (api.bank.com) is managed at the GSLB/network level and handles global load balancing between data centers.
+My understanding is that we can't directly configure Wide IP health checks from our platform side - this would typically be handled by the network team who manages the GSLB. What we can do is ensure our ingress health endpoints are available for the GSLB to monitor.
+Am I thinking about this correctly? If there's a specific Wide IP health check requirement I should be implementing differently, please let me know and we can discuss the best approach.
+Let me know if you have any questions or if anything needs adjustment.
