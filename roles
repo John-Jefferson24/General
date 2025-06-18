@@ -63,41 +63,41 @@ spec:
     termination: edge  # or passthrough/reencrypt as needed
 
 
+Subject: Health Check Updates - LLaMA 70B and Jina Embedding Models
+
 Hi team,
+
 Quick update on the routing and health check changes I've completed:
-What's been done:
 
-LLaMA 70B model: Set up health checks on port 9000 using /health/ready
-Jina embedding model: Configured two health endpoints - /v2/health/ready and /v2/health/alive
-All necessary route changes have been applied
-Added route-level health checks with the following annotations:
-haproxy.router.openshift.io/health_check_interval: "10s"
-haproxy.router.openshift.io/health_check_uri: "/health/ready" # or appropriate endpoint
+**What's been done:**
+- LLaMA 70B model: Set up health checks on port 9000 using `/health/ready` (using same endpoint for both liveness and readiness as v1 only has this one endpoint)
+- Jina embedding model: Configured two health endpoints - `/v2/health/ready` and `/v2/health/alive`
+- All necessary route changes have been applied
+- Added route-level health checks with HAProxy annotations:
+  ```
+  haproxy.router.openshift.io/health_check_interval: "10s"
+  haproxy.router.openshift.io/health_check_uri: "/health/ready"
+  ```
 
+**How these health checks work:**
 
-How these health checks work:
-Pod-level health checks:
+*Pod-level:*
+- **Readiness/Liveness probes**: Kubernetes checks if pods are healthy and ready for traffic. Removes unhealthy pods from rotation or restarts them.
 
-Readiness probe (/health/ready or /v2/health/ready): Determines if a pod is ready to receive traffic. If this fails, the pod is removed from service endpoints but keeps running
-Liveness probe (/v2/health/alive): Checks if the pod is still functioning. If this fails, Kubernetes restarts the pod
-These ensure we don't send traffic to pods that aren't ready or are stuck/crashed
+*Route-level (HAProxy):*
+- HAProxy monitors the Apache containers (not the backend pods directly)
+- Every 10 seconds, it checks Apache's health endpoint
+- If an Apache instance fails, HAProxy routes traffic to other healthy Apache containers
+- This provides redundancy at the routing layer - requires 2+ Apache instances for failover
 
-Route-level health checks (HAProxy):
+**Next steps:**
+- Add all configurations to repo (deployment manifests + routing configs)
+- Adjust probe timings for LLaMA 70B (currently takes ~5 min to start)
 
-The HAProxy router performs its own health checks against backend pods
-Every 10 seconds, it hits the specified health endpoint on each pod
-If a pod fails these checks, HAProxy stops routing traffic to it (even if Kubernetes still thinks it's ready)
-This provides an additional layer of protection at the ingress level
+**Wide IP health check question:**
+My understanding is that Wide IP (api.bank.com) health checks are managed at the GSLB level by the network team, not something we configure in our platform. We just need to ensure our endpoints are available for GSLB monitoring. Is this correct?
 
-Next steps - Repository updates:
-We need to add these configurations to our repo to ensure they're properly tracked and deployed:
+Let me know if you have any questions.
 
-Update deployment manifests with the new health check endpoints
-Add routing configurations for both models (including the HAProxy annotations)
-This will ensure consistency across all environments and make future deployments smoother
-
-Question about the Wide IP health check requirement:
-There was also a request for Wide IP health checks, and I wanted to clarify my understanding here. From what I know, the Wide IP (api.bank.com) is managed at the GSLB/network level and handles global load balancing between data centers.
-My understanding is that we can't directly configure Wide IP health checks from our platform side - this would typically be handled by the network team who manages the GSLB. What we can do is ensure our ingress health endpoints are available for the GSLB to monitor.
-Am I thinking about this correctly? If there's a specific Wide IP health check requirement I should be implementing differently, please let me know and we can discuss the best approach.
-Let me know if you have any questions or if anything needs adjustment.
+Thanks,
+[Your name]
