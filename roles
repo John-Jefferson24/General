@@ -63,41 +63,35 @@ spec:
     termination: edge  # or passthrough/reencrypt as needed
 
 
-Subject: Health Check Updates - LLaMA 70B and Jina Embedding Models
-
 Hi team,
-
 Quick update on the routing and health check changes I've completed:
+What's been done:
 
-**What's been done:**
-- LLaMA 70B model: Set up health checks on port 9000 using `/health/ready` (using same endpoint for both liveness and readiness as v1 only has this one endpoint)
-- Jina embedding model: Configured two health endpoints - `/v2/health/ready` and `/v2/health/alive`
-- All necessary route changes have been applied
-- Added route-level health checks with HAProxy annotations:
-  ```
-  haproxy.router.openshift.io/health_check_interval: "10s"
-  haproxy.router.openshift.io/health_check_uri: "/health/ready"
-  ```
+LLaMA 70B model: Set up health checks on port 9000 using /health/ready (using same endpoint for both liveness and readiness as v1 only has this one endpoint)
+Jina embedding model: Configured two health endpoints - /v2/health/ready and /v2/health/alive
+All necessary route changes have been applied
+Added route-level health checks with HAProxy annotations:
+haproxy.router.openshift.io/health_check_interval: "10s"
+haproxy.router.openshift.io/health_check_uri: "/health/ready"
 
-**How these health checks work:**
 
-*Pod-level:*
-- **Readiness/Liveness probes**: Kubernetes checks if pods are healthy and ready for traffic. Removes unhealthy pods from rotation or restarts them.
+How these health checks work:
+Pod-level:
 
-*Route-level (HAProxy):*
-- HAProxy monitors the Apache containers (not the backend pods directly)
-- Every 10 seconds, it checks Apache's health endpoint
-- If an Apache instance fails, HAProxy routes traffic to other healthy Apache containers
-- This provides redundancy at the routing layer - requires 2+ Apache instances for failover
+Readiness/Liveness probes: Kubernetes checks if pods are healthy and ready for traffic. Removes unhealthy pods from rotation or restarts them.
 
-**Next steps:**
-- Add all configurations to repo (deployment manifests + routing configs)
-- Adjust probe timings for LLaMA 70B (currently takes ~5 min to start)
+Route-level (HAProxy):
 
-**Wide IP health check question:**
+HAProxy monitors the Apache containers (not the backend pods directly)
+Every 10 seconds, it checks Apache's health endpoint
+If an Apache instance fails, HAProxy routes traffic to other healthy Apache containers
+This provides redundancy at the routing layer - requires 2+ Apache instances for failover
+
+Next steps:
+
+Add all configurations to repo (deployment manifests + routing configs)
+Adjust probe timings for LLaMA 70B (currently takes ~5 min to start)
+
+Wide IP health check question:
 My understanding is that Wide IP (api.bank.com) health checks are managed at the GSLB level by the network team, not something we configure in our platform. We just need to ensure our endpoints are available for GSLB monitoring. Is this correct?
-
 Let me know if you have any questions.
-
-Thanks,
-[Your name]
