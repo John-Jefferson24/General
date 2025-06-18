@@ -53,12 +53,30 @@ What's been done:
 LLaMA 70B model: Set up health checks on port 9000 using /health/ready
 Jina embedding model: Configured two health endpoints - /v2/health/ready and /v2/health/alive
 All necessary route changes have been applied
+Added route-level health checks with the following annotations:
+haproxy.router.openshift.io/health_check_interval: "10s"
+haproxy.router.openshift.io/health_check_uri: "/health/ready" # or appropriate endpoint
+
+
+How these health checks work:
+Pod-level health checks:
+
+Readiness probe (/health/ready or /v2/health/ready): Determines if a pod is ready to receive traffic. If this fails, the pod is removed from service endpoints but keeps running
+Liveness probe (/v2/health/alive): Checks if the pod is still functioning. If this fails, Kubernetes restarts the pod
+These ensure we don't send traffic to pods that aren't ready or are stuck/crashed
+
+Route-level health checks (HAProxy):
+
+The HAProxy router performs its own health checks against backend pods
+Every 10 seconds, it hits the specified health endpoint on each pod
+If a pod fails these checks, HAProxy stops routing traffic to it (even if Kubernetes still thinks it's ready)
+This provides an additional layer of protection at the ingress level
 
 Next steps - Repository updates:
 We need to add these configurations to our repo to ensure they're properly tracked and deployed:
 
 Update deployment manifests with the new health check endpoints
-Add routing configurations for both models
+Add routing configurations for both models (including the HAProxy annotations)
 This will ensure consistency across all environments and make future deployments smoother
 
 Question about the Wide IP health check requirement:
@@ -66,6 +84,3 @@ There was also a request for Wide IP health checks, and I wanted to clarify my u
 My understanding is that we can't directly configure Wide IP health checks from our platform side - this would typically be handled by the network team who manages the GSLB. What we can do is ensure our ingress health endpoints are available for the GSLB to monitor.
 Am I thinking about this correctly? If there's a specific Wide IP health check requirement I should be implementing differently, please let me know and we can discuss the best approach.
 Let me know if you have any questions or if anything needs adjustment.
-
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import rs
