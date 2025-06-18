@@ -66,3 +66,6 @@ There was also a request for Wide IP health checks, and I wanted to clarify my u
 My understanding is that we can't directly configure Wide IP health checks from our platform side - this would typically be handled by the network team who manages the GSLB. What we can do is ensure our ingress health endpoints are available for the GSLB to monitor.
 Am I thinking about this correctly? If there's a specific Wide IP health check requirement I should be implementing differently, please let me know and we can discuss the best approach.
 Let me know if you have any questions or if anything needs adjustment.
+
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rs
