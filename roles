@@ -1,6 +1,6 @@
 livenessProbe:
   httpGet:
-    path: /health/ready
+    path: /v2/health/ready
     port: 9000
   initialDelaySeconds: 10
   periodSeconds: 20
@@ -8,12 +8,29 @@ livenessProbe:
 
 readinessProbe:
   httpGet:
-    path: /health/ready
+    path: /v2/health/live
     port: 9000
   initialDelaySeconds: 15
   periodSeconds: 10
   failureThreshold: 3
 
+llama
+    livenessProbe:
+      httpGet:
+        path: /health/ready
+        port: 9000
+      initialDelaySeconds: 480 
+      periodSeconds: 30 
+      timeoutSeconds: 10
+      failureThreshold: 3
+    readinessProbe:
+      httpGet:
+        path: /health/ready
+        port: 9000
+      initialDelaySeconds: 420
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 12
 
 apiVersion: route.openshift.io/v1
 kind: Route
