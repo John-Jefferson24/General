@@ -1,97 +1,65 @@
-livenessProbe:
-  httpGet:
-    path: /v2/health/ready
-    port: 9000
-  initialDelaySeconds: 10
-  periodSeconds: 20
-  failureThreshold: 3
+pyOpenSSL>=21.0.0
 
-readinessProbe:
-  httpGet:
-    path: /v2/health/live
-    port: 9000
-  initialDelaySeconds: 15
-  periodSeconds: 10
-  failureThreshold: 3
+FROM registry-eng.sdi.corp.bankofamerica.com/bac/httpd-24-rhel9:latest
 
-llama
-    livenessProbe:
-      httpGet:
-        path: /health/ready
-        port: 9000
-      initialDelaySeconds: 480 
-      periodSeconds: 30 
-      timeoutSeconds: 10
-      failureThreshold: 3
-    readinessProbe:
-      httpGet:
-        path: /health/ready
-        port: 9000
-      initialDelaySeconds: 420
-      periodSeconds: 10
-      timeoutSeconds: 5
-      failureThreshold: 12
+USER root
 
-apiVersion: route.openshift.io/v1
-kind: Route
-metadata:
-  name: triton-openai-route
-  annotations:
-    # Health check configuration
-    haproxy.router.openshift.io/health_check_interval: "10s"
-    haproxy.router.openshift.io/health_check_uri: "/health/ready"
-    
-    # Traffic management
-    haproxy.router.openshift.io/balance: "roundrobin"
-    haproxy.router.openshift.io/disable_cookies: "true"
-    
-    # Optional: Timeout settings
-    haproxy.router.openshift.io/timeout: "60s"
-    haproxy.router.openshift.io/timeout-tunnel: "1h"
-    
-    # Optional: Health check timeout
-    haproxy.router.openshift.io/health_check_timeout: "5s"
-spec:
-  host: api.bank.com
-  to:
-    kind: Service
-    name: triton-openai-service
-    weight: 100
-  port:
-    targetPort: 9000
-  tls:
-    termination: edge  # or passthrough/reencrypt as needed
+# Install dependencies for cryptography compilation
+RUN dnf groupinstall -y "Development Tools" && \
+    dnf install -y \
+        python3 \
+        python3-pip \
+        python3-devel \
+        openssl-devel \
+        libffi-devel \
+        rust \
+        cargo && \
+    dnf clean all
 
+# Install mod_wsgi
+RUN dnf install -y mod_wsgi && \
+    dnf clean all
 
-Hi team,
-Quick update on the routing and health check changes I've completed:
-What's been done:
+# Install mod_auth_openidc
+RUN dnf install -y mod_auth_openidc && \
+    dnf clean all
 
-LLaMA 70B model: Set up health checks on port 9000 using /health/ready (using same endpoint for both liveness and readiness as v1 only has this one endpoint)
-Jina embedding model: Configured two health endpoints - /v2/health/ready and /v2/health/alive
-All necessary route changes have been applied
-Added route-level health checks with HAProxy annotations:
-haproxy.router.openshift.io/health_check_interval: "10s"
-haproxy.router.openshift.io/health_check_uri: "/health/ready"
+# Make directories
+RUN mkdir -p /var/www/wsgi
 
+# Copy application files
+COPY ./app/sso.py /var/www/wsgi/sso.py
+COPY ./app/router.py /var/www/wsgi/router.py
+COPY ./app/router_v2.py /var/www/wsgi/router_v2.py
+COPY ./app/auth.py /var/www/wsgi/auth.py
+COPY ./app/ges.py /var/www/wsgi/ges.py
+COPY ./app/requirements.txt /tmp/requirements.txt
 
-How these health checks work:
-Pod-level:
+# Set pip config for internal repo
+COPY ./configs/pip.conf /etc/pip.conf
 
-Readiness/Liveness probes: Kubernetes checks if pods are healthy and ready for traffic. Removes unhealthy pods from rotation or restarts them.
+# Upgrade pip and install Python dependencies
+RUN pip3 install --upgrade pip setuptools wheel && \
+    pip3 install --no-cache-dir -r /tmp/requirements.txt
 
-Route-level (HAProxy):
+# Set environment variables
+ENV PYTHONHOME=/usr
+ENV PYTHONPATH=/usr/lib/python3.9:/usr/lib/python3.9/lib-dynload:/usr/lib/python3.9/site-packages
 
-HAProxy monitors the Apache containers (not the backend pods directly)
-Every 10 seconds, it checks Apache's health endpoint
-If an Apache instance fails, HAProxy routes traffic to other healthy Apache containers
-This provides redundancy at the routing layer - requires 2+ Apache instances for failover
+# Copy Apache configurations (uncommented these lines)
+COPY ./configs/httpd.conf /etc/httpd/conf.d/httpd.conf
 
-Next steps:
+# Change permissions
+RUN chmod -R 775 /etc/httpd/conf.d && \
+    chmod -R 775 /etc/httpd/conf.modules.d && \
+    chmod -R 775 /etc/httpd/conf && \
+    chmod -R 775 /etc/httpd/logs && \
+    chmod -R 775 /etc/httpd/run && \
+    chmod -R 775 /etc/httpd/modules && \
+    chmod -R 777 /run/httpd && \
+    chmod -R 777 /var/log && \
+    chmod -R 777 /var/www/html && \
+    chmod -R 777 /var/www/wsgi
 
-Add all configurations to repo (deployment manifests + routing configs)
-Adjust probe timings for LLaMA 70B (currently takes ~5 min to start)
-
-Wide IP health check question:
-My understanding is that Wide IP (api.bank.com) health checks are managed at the GSLB level by the network team, not something we configure in our platform. We just need to ensure our endpoints are available for GSLB monitoring. Is this correct?
-Let me know if you have any questions.
+# Expose port
+EXPOSE 8080
