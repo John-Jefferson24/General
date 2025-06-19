@@ -1,3 +1,7 @@
-# ADD THIS: Install compilation dependencies for cryptography
-RUN yum install -y python3-devel openssl-devel libffi-devel gcc && \
-    yum clean all
+import json
+import sys
+import os
+
+# Add current directory to Python path and import your module
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import auth
