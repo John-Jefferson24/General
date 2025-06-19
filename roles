@@ -1,7 +1,13 @@
-import json
-import sys
-import os
+# ADD THESE LINES FOR DAEMON MODE (fixes the PyO3 subinterpreter issue)
+WSGIDaemonProcess modelrouter python-path=/var/www/wsgi
+WSGIProcessGroup modelrouter
 
-# Add current directory to Python path and import your module
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import auth
+# Your existing WSGI script line stays the same
+WSGIScriptAlias "/" "/var/www/wsgi/model_router.py"
+
+# WSGI directory permissions - UPDATE THIS SECTION
+<Directory "/var/www/wsgi">
+    WSGIProcessGroup modelrouter
+    WSGIApplicationGroup %{GLOBAL}
+    Require all granted
+</Directory>
