@@ -1,201 +1,82 @@
-# ======================================================================
-# Simple JupyterHub OpenShift Values.yaml Fixer 
-# ======================================================================
-# This script makes minimal targeted changes to fix JupyterHub spawning
-# ======================================================================
-
-param(
-    [string]$ChartPath = "H:\oc\snorkelflow",
-    [switch]$WhatIf = $false,
-    [switch]$Verbose = $false
-)
-
-# Color functions
-function Write-Success { param($Message) Write-Host $Message -ForegroundColor Green }
-function Write-Info { param($Message) Write-Host $Message -ForegroundColor Cyan }
-function Write-Warning { param($Message) Write-Host $Message -ForegroundColor Yellow }
-function Write-Error { param($Message) Write-Host $Message -ForegroundColor Red }
-
-Write-Host ""
-Write-Host "Simple JupyterHub OpenShift Fixer" -ForegroundColor Magenta
-Write-Host "=================================" -ForegroundColor Magenta
-
-$ValuesPath = Join-Path $ChartPath "values.yaml"
-
-if (-not (Test-Path $ValuesPath)) {
-    Write-Error "❌ values.yaml not found: $ValuesPath"
-    exit 1
-}
-
-# Create backup
-if (-not $WhatIf) {
-    $BackupPath = Join-Path $ChartPath "values.yaml.backup.$(Get-Date -Format 'yyyyMMdd_HHmmss')"
-    Copy-Item $ValuesPath -Destination $BackupPath
-    Write-Info "💾 Backup created: $BackupPath"
-}
-
-# Read file as array of lines for easier manipulation
-$lines = Get-Content $ValuesPath
-$newLines = @()
-$changes = 0
-
-Write-Info "📖 Processing $($lines.Count) lines..."
-
-for ($i = 0; $i -lt $lines.Count; $i++) {
-    $line = $lines[$i]
-    $newLines += $line
+jupyterhub:
+    # Define non-default resource limits & requests
+    resources: {}
+    env: {}
+    labels: {}
+    # sensitive env vars will be set by passing filename instead of k8s SecretKeySelector
+    secretsFromFile: false
+    # Enable the in-platform notebook
+    enabled: true
     
-    # Look for specific patterns and add our fixes after them
+    # OpenShift compatibility
+    containerSecurityContext: {}
+    podSecurityContext: {}
     
-    # 1. After "enabled: true" in jupyterhub section, add security context overrides
-    if ($line -match '^\s*enabled:\s*true\s*$' -and $i -gt 0) {
-        # Check if we're in the jupyterhub section by looking back
-        $inJupyterHub = $false
-        for ($j = $i - 10; $j -lt $i; $j++) {
-            if ($j -ge 0 -and $lines[$j] -match '^\s*jupyterhub:\s*$') {
-                $inJupyterHub = $true
-                break
-            }
-        }
-        
-        if ($inJupyterHub) {
-            $indent = ($line -replace '\S.*').Length
-            $newLines += ""
-            $newLines += " " * $indent + "# OpenShift compatibility"
-            $newLines += " " * $indent + "containerSecurityContext: {}"
-            $newLines += " " * $indent + "podSecurityContext: {}"
-            $changes++
-            if ($Verbose) { Write-Info "  ✓ Added security context overrides to jupyterhub section" }
-        }
-    }
+    singleUserNotebook:
+      # The name of the service account to bind to the single-user notebook pods
+      serviceAccountName: snorkelflow-jupyterhub-user-sa
+      # The start timeout of a single-user notebook pod, in seconds
+      startTimeout: 300
+      # Whether notebook pods should spin up with a GPU (gpu.gpu_config must be filled out)
+      gpu: false
+      # Whether to limit its minio access to its own user directory
+      minio_user_dir_only: false
+      # Defines the resources given to each user's notebook
+      resources:
+        cpu_guarantee: 1
+        cpu_limit: 1
+        memory_guarantee: 2G
+        memory_limit: 8G
+      storage:
+        # The storage class to use for the persistent volume bound to the single-user notebook pod
+        # Used when storage type is dynamic
+        dynamicClass: "null"
+        # The storage type to use (static/dynamic)
+        type: dynamic
+      
+      # OpenShift compatibility settings
+      securityContext: {}
+      uid: null
+      fsGid: null
+      allowPrivilegeEscalation: false
+      cloudMetadata:
+        blockWithIptables: false
     
-    # 2. After "type: dynamic" in storage section, add OpenShift settings
-    if ($line -match '^\s*type:\s*dynamic\s*$') {
-        # Check if we're in singleUserNotebook section
-        $inSingleUser = $false
-        for ($j = $i - 20; $j -lt $i; $j++) {
-            if ($j -ge 0 -and $lines[$j] -match '^\s*singleUserNotebook:\s*$') {
-                $inSingleUser = $true
-                break
-            }
-        }
-        
-        if ($inSingleUser) {
-            # Get the indentation of the storage section (should be 6 spaces)
-            $storageIndent = 0
-            for ($j = $i - 10; $j -lt $i; $j++) {
-                if ($j -ge 0 -and $lines[$j] -match '^(\s*)storage:\s*$') {
-                    $storageIndent = $Matches[1].Length
-                    break
-                }
-            }
-            
-            $indent = " " * $storageIndent
-            $newLines += ""
-            $newLines += $indent + "# OpenShift compatibility settings"
-            $newLines += $indent + "securityContext: {}"
-            $newLines += $indent + "uid: null"
-            $newLines += $indent + "fsGid: null" 
-            $newLines += $indent + "allowPrivilegeEscalation: false"
-            $newLines += $indent + "cloudMetadata:"
-            $newLines += $indent + "  blockWithIptables: false"
-            $changes++
-            if ($Verbose) { Write-Info "  ✓ Added OpenShift settings to singleUserNotebook" }
-        }
-    }
-}
-
-# 3. Add hub configuration at the end of the jupyterhub section
-# Find the end of the jupyterhub section and add hub config there
-$jupyterHubSectionEnd = -1
-$jupyterHubIndent = 0
-
-for ($i = 0; $i -lt $newLines.Count; $i++) {
-    if ($newLines[$i] -match '^(\s*)jupyterhub:\s*$') {
-        $jupyterHubIndent = $Matches[1].Length
-        
-        # Find the end of this section (next section at same or less indentation)
-        for ($j = $i + 1; $j -lt $newLines.Count; $j++) {
-            $nextLine = $newLines[$j]
-            if ($nextLine -match '^(\s+)\w+:\s*$') {
-                $nextIndent = $Matches[1].Length
-                if ($nextIndent -le $jupyterHubIndent) {
-                    $jupyterHubSectionEnd = $j - 1
-                    break
-                }
-            }
-        }
-        break
-    }
-}
-
-if ($jupyterHubSectionEnd -gt 0) {
-    $indent = " " * ($jupyterHubIndent + 2)  # Add 2 spaces for proper nesting
-    
-    $hubConfig = @(
-        "",
-        $indent + "# Hub configuration for OpenShift",
-        $indent + "hub:",
-        $indent + "  containerSecurityContext: {}",
-        $indent + "  podSecurityContext: {}",
-        $indent + "  extraConfig:",
-        $indent + "    openshift_compatibility: |",
-        $indent + "      # Fix spawner for OpenShift",
-        $indent + "      c.KubeSpawner.uid = None",
-        $indent + "      c.KubeSpawner.fs_gid = None", 
-        $indent + "      c.KubeSpawner.allow_privilege_escalation = False",
-        $indent + "      c.KubeSpawner.init_containers = []",
-        $indent + "      ",
-        $indent + "      # Override spawn hook for OpenShift",
-        $indent + "      def openshift_spawn_hook(spawner):",
-        $indent + "          spawner.uid = None",
-        $indent + "          spawner.fs_gid = None", 
-        $indent + "          spawner.allow_privilege_escalation = False",
-        $indent + "          spawner.service_account = 'snorkelflow-jupyterhub-user-sa'",
-        $indent + "          ",
-        $indent + "          # Keep existing secret functionality",
-        $indent + "          volume_name = 'snorkel-api-key'",
-        $indent + "          mount_path = '/var/run/snorkelflow/api'",
-        $indent + "          spawner.volumes.append({",
-        $indent + "              'name': volume_name,",
-        $indent + "              'secret': {",
-        $indent + "                  'secretName': spawner._expand_user_properties(",
-        $indent + "                      'snorkel-api-key-{escaped_username}'",
-        $indent + "                  ),",
-        $indent + "              },",
-        $indent + "          })",
-        $indent + "          spawner.volume_mounts.append({",
-        $indent + "              'name': volume_name,",
-        $indent + "              'mountPath': mount_path,",
-        $indent + "              'readOnly': True,",
-        $indent + "          })",
-        $indent + "          spawner.environment['SNORKELFLOW_API_KEY_FILE'] = f'{mount_path}/key'",
-        $indent + "      ",
-        $indent + "      c.Spawner.pre_spawn_hook = openshift_spawn_hook"
-    )
-    
-    # Insert hub config before the end of jupyterhub section
-    $finalLines = @()
-    $finalLines += $newLines[0..$jupyterHubSectionEnd]
-    $finalLines += $hubConfig
-    $finalLines += $newLines[($jupyterHubSectionEnd + 1)..($newLines.Count - 1)]
-    $newLines = $finalLines
-    $changes++
-    if ($Verbose) { Write-Info "  ✓ Added hub configuration to jupyterhub section" }
-}
-
-# Write the results
-if ($changes -gt 0) {
-    if (-not $WhatIf) {
-        $newLines | Set-Content $ValuesPath -Encoding UTF8
-        Write-Success "✅ Applied $changes changes to values.yaml"
-    } else {
-        Write-Warning "📝 Would apply $changes changes to values.yaml"
-    }
-} else {
-    Write-Info "ℹ️  No changes needed"
-}
-
-Write-Host ""
-Write-Info "🚀 Next step: helm upgrade snorkelflow . -n snorkelflow"
-Write-Host ""
+    # Hub configuration for OpenShift
+    hub:
+      containerSecurityContext: {}
+      podSecurityContext: {}
+      extraConfig:
+        openshift_compatibility: |
+          # Fix spawner for OpenShift
+          c.KubeSpawner.uid = None
+          c.KubeSpawner.fs_gid = None
+          c.KubeSpawner.allow_privilege_escalation = False
+          c.KubeSpawner.init_containers = []
+          
+          # Override spawn hook for OpenShift
+          def openshift_spawn_hook(spawner):
+              spawner.uid = None
+              spawner.fs_gid = None
+              spawner.allow_privilege_escalation = False
+              spawner.service_account = 'snorkelflow-jupyterhub-user-sa'
+              
+              # Keep existing secret functionality
+              volume_name = 'snorkel-api-key'
+              mount_path = '/var/run/snorkelflow/api'
+              spawner.volumes.append({
+                  'name': volume_name,
+                  'secret': {
+                      'secretName': spawner._expand_user_properties(
+                          'snorkel-api-key-{escaped_username}'
+                      ),
+                  },
+              })
+              spawner.volume_mounts.append({
+                  'name': volume_name,
+                  'mountPath': mount_path,
+                  'readOnly': True,
+              })
+              spawner.environment['SNORKELFLOW_API_KEY_FILE'] = f'{mount_path}/key'
+          
+          c.Spawner.pre_spawn_hook = openshift_spawn_hook
