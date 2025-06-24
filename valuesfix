@@ -1,11 +1,7 @@
 # ======================================================================
-# JupyterHub OpenShift Compatibility Fixer for values.yaml
+# Simple JupyterHub OpenShift Values.yaml Fixer 
 # ======================================================================
-# This script modifies ONLY the JupyterHub-related settings in values.yaml
-# to make notebook spawning work with OpenShift SCCs
-#
-# Usage: .\fix-jupyterhub-values.ps1 
-# Optional: .\fix-jupyterhub-values.ps1 -ChartPath "C:\path\to\chart"
+# This script makes minimal targeted changes to fix JupyterHub spawning
 # ======================================================================
 
 param(
@@ -14,259 +10,192 @@ param(
     [switch]$Verbose = $false
 )
 
-# Color functions for better output
+# Color functions
 function Write-Success { param($Message) Write-Host $Message -ForegroundColor Green }
 function Write-Info { param($Message) Write-Host $Message -ForegroundColor Cyan }
 function Write-Warning { param($Message) Write-Host $Message -ForegroundColor Yellow }
 function Write-Error { param($Message) Write-Host $Message -ForegroundColor Red }
-function Write-Detail { param($Message) Write-Host $Message -ForegroundColor Gray }
 
-# Script header
 Write-Host ""
-Write-Host "===============================================" -ForegroundColor Magenta
-Write-Host "  JupyterHub OpenShift Values.yaml Fixer" -ForegroundColor Magenta
-Write-Host "  Notebook Spawner Compatibility" -ForegroundColor Magenta
-Write-Host "===============================================" -ForegroundColor Magenta
-Write-Host ""
+Write-Host "Simple JupyterHub OpenShift Fixer" -ForegroundColor Magenta
+Write-Host "=================================" -ForegroundColor Magenta
 
-Write-Info "🔧 Starting JupyterHub values.yaml fixes..."
-Write-Info "📁 Chart Path: $ChartPath"
-
-if ($WhatIf) {
-    Write-Warning "🔍 WHAT-IF MODE: No changes will be made, only showing what would be changed"
-}
-
-# Validate chart directory and values.yaml
 $ValuesPath = Join-Path $ChartPath "values.yaml"
-
-if (-not (Test-Path $ChartPath)) {
-    Write-Error "❌ Chart directory not found: $ChartPath"
-    exit 1
-}
 
 if (-not (Test-Path $ValuesPath)) {
     Write-Error "❌ values.yaml not found: $ValuesPath"
     exit 1
 }
 
-Write-Success "✅ Found values.yaml: $ValuesPath"
-
-# Create backup (skip in WhatIf mode)
+# Create backup
 if (-not $WhatIf) {
     $BackupPath = Join-Path $ChartPath "values.yaml.backup.$(Get-Date -Format 'yyyyMMdd_HHmmss')"
     Copy-Item $ValuesPath -Destination $BackupPath
-    Write-Warning "💾 Created backup: $BackupPath"
+    Write-Info "💾 Backup created: $BackupPath"
 }
 
-# Read the entire file
-$content = Get-Content $ValuesPath -Raw
-$originalContent = $content
+# Read file as array of lines for easier manipulation
+$lines = Get-Content $ValuesPath
+$newLines = @()
+$changes = 0
 
-Write-Info "📖 Read values.yaml content ($(($content -split "`n").Count) lines)"
+Write-Info "📖 Processing $($lines.Count) lines..."
 
-# Track changes
-$changes = @()
-
-# ======================================================================
-# CHANGE 1: Add OpenShift compatibility to jupyterhub service section
-# ======================================================================
-Write-Info "🔍 1. Adding OpenShift compatibility to jupyterhub service section..."
-
-# Find the jupyterhub service section and add containerSecurityContext and podSecurityContext
-$jupyterhubPattern = '(\s*jupyterhub:\s*\r?\n(?:\s*#[^\r\n]*\r?\n)*\s*#[^\r\n]*resources[^\r\n]*\r?\n\s*resources:\s*\{\}\s*\r?\n\s*env:\s*\{\}\s*\r?\n\s*labels:\s*\{\}\s*\r?\n(?:\s*#[^\r\n]*\r?\n)*\s*secretsFromFile:\s*false\s*\r?\n(?:\s*#[^\r\n]*\r?\n)*\s*enabled:\s*true)'
-
-if ($content -match $jupyterhubPattern) {
-    $replacement = $Matches[1] + "`r`n    `r`n    # OpenShift compatibility overrides`r`n    containerSecurityContext: {}`r`n    podSecurityContext: {}"
-    $content = $content -replace [regex]::Escape($Matches[1]), $replacement
-    $changes += "Added containerSecurityContext and podSecurityContext to jupyterhub service"
-    if ($Verbose) { Write-Detail "  ✓ Added OpenShift security context overrides" }
-} else {
-    Write-Warning "  ⚠ Could not find jupyterhub service section pattern"
-}
-
-# ======================================================================
-# CHANGE 2: Add OpenShift settings to singleUserNotebook section  
-# ======================================================================
-Write-Info "🔍 2. Adding OpenShift settings to singleUserNotebook section..."
-
-# Find the singleUserNotebook storage section and add OpenShift settings after it
-$singleUserPattern = '(\s*storage:\s*\r?\n(?:\s*#[^\r\n]*\r?\n)*\s*#[^\r\n]*storageclass[^\r\n]*\r?\n[^\r\n]*\r?\n\s*dynamicClass:\s*"null"\s*\r?\n(?:\s*#[^\r\n]*\r?\n)*\s*type:\s*dynamic)'
-
-if ($content -match $singleUserPattern) {
-    $replacement = $Matches[1] + "`r`n      `r`n      # OpenShift compatibility settings`r`n      securityContext: {}`r`n      uid: null`r`n      fsGid: null`r`n      allowPrivilegeEscalation: false`r`n      cloudMetadata:`r`n        blockWithIptables: false"
-    $content = $content -replace [regex]::Escape($Matches[1]), $replacement
-    $changes += "Added OpenShift compatibility settings to singleUserNotebook"
-    if ($Verbose) { Write-Detail "  ✓ Added singleUserNotebook OpenShift settings" }
-} else {
-    Write-Warning "  ⚠ Could not find singleUserNotebook storage section pattern"
-}
-
-# ======================================================================
-# CHANGE 3: Add extraConfig to existing jupyterhub section
-# ======================================================================
-Write-Info "🔍 3. Adding extraConfig to jupyterhub section..."
-
-# Find the end of the singleUserNotebook section and add extraConfig
-$extraConfigPattern = '(\s*singleUserNotebook:\s*\r?\n(?:[^\r\n]*\r?\n)*?(?:\s*blockWithIptables:\s*false\s*\r?\n))'
-
-if ($content -match $extraConfigPattern) {
-    $extraConfig = @"
+for ($i = 0; $i -lt $lines.Count; $i++) {
+    $line = $lines[$i]
+    $newLines += $line
     
-    # JupyterHub hub configuration for OpenShift
-    hub:
-      containerSecurityContext: {}
-      podSecurityContext: {}
-      extraConfig:
-        openshift_compatibility: |
-          # OpenShift spawner fixes
-          c.KubeSpawner.uid = None
-          c.KubeSpawner.fs_gid = None
-          c.KubeSpawner.allow_privilege_escalation = False
-          
-          # Disable problematic init containers that require root
-          c.KubeSpawner.init_containers = []
-          
-          # Override security context for spawned pods
-          def openshift_spawn_hook(spawner):
-              # Remove hardcoded security contexts
-              spawner.uid = None
-              spawner.fs_gid = None
-              spawner.allow_privilege_escalation = False
-              
-              # Ensure service account (keep existing functionality)
-              spawner.service_account = "snorkelflow-jupyterhub-user-sa"
-              
-              # Keep the existing secret functionality
-              volume_name = "snorkel-api-key"
-              mount_path = "/var/run/snorkelflow/api"
-              spawner.volumes.append({
-                  "name": volume_name,
-                  "secret": {
-                      "secretName": spawner._expand_user_properties(
-                          "snorkel-api-key-{escaped_username}"
-                      ),
-                  },
-              })
-              spawner.volume_mounts.append({
-                  "name": volume_name,
-                  "mountPath": mount_path,
-                  "readOnly": True,
-              })
-              spawner.environment["SNORKELFLOW_API_KEY_FILE"] = f"{mount_path}/key"
-          
-          # Replace the spawn hook
-          c.Spawner.pre_spawn_hook = openshift_spawn_hook
+    # Look for specific patterns and add our fixes after them
     
-    # Global singleuser overrides for OpenShift
-    singleuser:
-      uid: null
-      fsGid: null
-      allowPrivilegeEscalation: false
-      cloudMetadata:
-        blockWithIptables: false
-      containerSecurityContext: {}
-      podSecurityContext: {}
-"@
-
-    $replacement = $Matches[1] + $extraConfig
-    $content = $content -replace [regex]::Escape($Matches[1]), $replacement
-    $changes += "Added hub extraConfig with OpenShift spawner fixes"
-    $changes += "Added singleuser global overrides"
-    if ($Verbose) { Write-Detail "  ✓ Added hub configuration within jupyterhub service" }
-} else {
-    Write-Warning "  ⚠ Could not find end of singleUserNotebook section to add extraConfig"
-}
-
-# ======================================================================
-# Write changes or show what would be changed
-# ======================================================================
-
-$changesMade = $content -ne $originalContent
-
-if ($changesMade) {
-    if (-not $WhatIf) {
-        $content | Set-Content $ValuesPath -Encoding UTF8
-        Write-Success "✅ Successfully updated values.yaml"
-    } else {
-        Write-Warning "📝 Would modify values.yaml with the following changes:"
-    }
-    
-    foreach ($change in $changes) {
-        if ($WhatIf) {
-            Write-Warning "  • $change"
-        } else {
-            Write-Success "  ✓ $change"
+    # 1. After "enabled: true" in jupyterhub section, add security context overrides
+    if ($line -match '^\s*enabled:\s*true\s*$' -and $i -gt 0) {
+        # Check if we're in the jupyterhub section by looking back
+        $inJupyterHub = $false
+        for ($j = $i - 10; $j -lt $i; $j++) {
+            if ($j -ge 0 -and $lines[$j] -match '^\s*jupyterhub:\s*$') {
+                $inJupyterHub = $true
+                break
+            }
+        }
+        
+        if ($inJupyterHub) {
+            $indent = ($line -replace '\S.*').Length
+            $newLines += ""
+            $newLines += " " * $indent + "# OpenShift compatibility"
+            $newLines += " " * $indent + "containerSecurityContext: {}"
+            $newLines += " " * $indent + "podSecurityContext: {}"
+            $changes++
+            if ($Verbose) { Write-Info "  ✓ Added security context overrides to jupyterhub section" }
         }
     }
-} else {
-    Write-Info "ℹ️  No changes needed - values.yaml appears to already have OpenShift compatibility settings"
+    
+    # 2. After "type: dynamic" in storage section, add OpenShift settings
+    if ($line -match '^\s*type:\s*dynamic\s*$') {
+        # Check if we're in singleUserNotebook section
+        $inSingleUser = $false
+        for ($j = $i - 20; $j -lt $i; $j++) {
+            if ($j -ge 0 -and $lines[$j] -match '^\s*singleUserNotebook:\s*$') {
+                $inSingleUser = $true
+                break
+            }
+        }
+        
+        if ($inSingleUser) {
+            # Get the indentation of the storage section (should be 6 spaces)
+            $storageIndent = 0
+            for ($j = $i - 10; $j -lt $i; $j++) {
+                if ($j -ge 0 -and $lines[$j] -match '^(\s*)storage:\s*$') {
+                    $storageIndent = $Matches[1].Length
+                    break
+                }
+            }
+            
+            $indent = " " * $storageIndent
+            $newLines += ""
+            $newLines += $indent + "# OpenShift compatibility settings"
+            $newLines += $indent + "securityContext: {}"
+            $newLines += $indent + "uid: null"
+            $newLines += $indent + "fsGid: null" 
+            $newLines += $indent + "allowPrivilegeEscalation: false"
+            $newLines += $indent + "cloudMetadata:"
+            $newLines += $indent + "  blockWithIptables: false"
+            $changes++
+            if ($Verbose) { Write-Info "  ✓ Added OpenShift settings to singleUserNotebook" }
+        }
+    }
 }
 
-# ======================================================================
-# Summary and next steps
-# ======================================================================
+# 3. Add hub configuration at the end of the jupyterhub section
+# Find the end of the jupyterhub section and add hub config there
+$jupyterHubSectionEnd = -1
+$jupyterHubIndent = 0
 
-Write-Host ""
-Write-Host "===============================================" -ForegroundColor Magenta
-Write-Host "  SUMMARY" -ForegroundColor Magenta  
-Write-Host "===============================================" -ForegroundColor Magenta
+for ($i = 0; $i -lt $newLines.Count; $i++) {
+    if ($newLines[$i] -match '^(\s*)jupyterhub:\s*$') {
+        $jupyterHubIndent = $Matches[1].Length
+        
+        # Find the end of this section (next section at same or less indentation)
+        for ($j = $i + 1; $j -lt $newLines.Count; $j++) {
+            $nextLine = $newLines[$j]
+            if ($nextLine -match '^(\s+)\w+:\s*$') {
+                $nextIndent = $Matches[1].Length
+                if ($nextIndent -le $jupyterHubIndent) {
+                    $jupyterHubSectionEnd = $j - 1
+                    break
+                }
+            }
+        }
+        break
+    }
+}
 
-if ($WhatIf) {
-    Write-Info "🔍 WHAT-IF RESULTS:"
-    if ($changesMade) {
-        Write-Warning "   📝 values.yaml would be modified with $($changes.Count) changes"
+if ($jupyterHubSectionEnd -gt 0) {
+    $indent = " " * ($jupyterHubIndent + 2)  # Add 2 spaces for proper nesting
+    
+    $hubConfig = @(
+        "",
+        $indent + "# Hub configuration for OpenShift",
+        $indent + "hub:",
+        $indent + "  containerSecurityContext: {}",
+        $indent + "  podSecurityContext: {}",
+        $indent + "  extraConfig:",
+        $indent + "    openshift_compatibility: |",
+        $indent + "      # Fix spawner for OpenShift",
+        $indent + "      c.KubeSpawner.uid = None",
+        $indent + "      c.KubeSpawner.fs_gid = None", 
+        $indent + "      c.KubeSpawner.allow_privilege_escalation = False",
+        $indent + "      c.KubeSpawner.init_containers = []",
+        $indent + "      ",
+        $indent + "      # Override spawn hook for OpenShift",
+        $indent + "      def openshift_spawn_hook(spawner):",
+        $indent + "          spawner.uid = None",
+        $indent + "          spawner.fs_gid = None", 
+        $indent + "          spawner.allow_privilege_escalation = False",
+        $indent + "          spawner.service_account = 'snorkelflow-jupyterhub-user-sa'",
+        $indent + "          ",
+        $indent + "          # Keep existing secret functionality",
+        $indent + "          volume_name = 'snorkel-api-key'",
+        $indent + "          mount_path = '/var/run/snorkelflow/api'",
+        $indent + "          spawner.volumes.append({",
+        $indent + "              'name': volume_name,",
+        $indent + "              'secret': {",
+        $indent + "                  'secretName': spawner._expand_user_properties(",
+        $indent + "                      'snorkel-api-key-{escaped_username}'",
+        $indent + "                  ),",
+        $indent + "              },",
+        $indent + "          })",
+        $indent + "          spawner.volume_mounts.append({",
+        $indent + "              'name': volume_name,",
+        $indent + "              'mountPath': mount_path,",
+        $indent + "              'readOnly': True,",
+        $indent + "          })",
+        $indent + "          spawner.environment['SNORKELFLOW_API_KEY_FILE'] = f'{mount_path}/key'",
+        $indent + "      ",
+        $indent + "      c.Spawner.pre_spawn_hook = openshift_spawn_hook"
+    )
+    
+    # Insert hub config before the end of jupyterhub section
+    $finalLines = @()
+    $finalLines += $newLines[0..$jupyterHubSectionEnd]
+    $finalLines += $hubConfig
+    $finalLines += $newLines[($jupyterHubSectionEnd + 1)..($newLines.Count - 1)]
+    $newLines = $finalLines
+    $changes++
+    if ($Verbose) { Write-Info "  ✓ Added hub configuration to jupyterhub section" }
+}
+
+# Write the results
+if ($changes -gt 0) {
+    if (-not $WhatIf) {
+        $newLines | Set-Content $ValuesPath -Encoding UTF8
+        Write-Success "✅ Applied $changes changes to values.yaml"
     } else {
-        Write-Info "   ℹ️  No changes would be made"
+        Write-Warning "📝 Would apply $changes changes to values.yaml"
     }
 } else {
-    if ($changesMade) {
-        Write-Success "🎉 JupyterHub OpenShift fixes completed successfully!"
-        Write-Success "   📝 Applied $($changes.Count) changes to values.yaml"
-        Write-Warning "   💾 Backup created: $BackupPath"
-    } else {
-        Write-Success "✅ values.yaml already appears to be OpenShift compatible!"
-    }
+    Write-Info "ℹ️  No changes needed"
 }
 
 Write-Host ""
-Write-Info "📋 Changes applied:"
-Write-Warning "  🔹 JupyterHub Service Security Context"
-Write-Detail "     Added containerSecurityContext: {} and podSecurityContext: {}"
-
-Write-Warning "  🔹 Single User Notebook OpenShift Settings"  
-Write-Detail "     Added uid: null, fsGid: null, allowPrivilegeEscalation: false"
-Write-Detail "     Added cloudMetadata.blockWithIptables: false"
-
-Write-Warning "  🔹 Hub Configuration with Spawner Fixes"
-Write-Detail "     Added extraConfig with OpenShift compatibility code"
-Write-Detail "     Added global singleuser overrides"
-
-Write-Host ""
-Write-Info "🚀 Next steps:"
-Write-Host "1. Deploy the updated configuration:" -ForegroundColor White
-Write-Host "   helm upgrade snorkelflow . -f values.yaml -n snorkelflow" -ForegroundColor Gray
-
-Write-Host "2. Watch the deployment:" -ForegroundColor White  
-Write-Host "   oc get pods -n snorkelflow -w" -ForegroundColor Gray
-
-Write-Host "3. Test notebook spawning:" -ForegroundColor White
-Write-Host "   - Access JupyterHub UI" -ForegroundColor Gray
-Write-Host "   - Try to start a notebook server" -ForegroundColor Gray
-
-Write-Host ""
-Write-Info "🔍 If issues persist, check JupyterHub logs:"
-Write-Host 'oc logs deployment/jupyterhub -n snorkelflow -f' -ForegroundColor Gray
-
-Write-Host ""
-if (-not $WhatIf -and $changesMade) {
-    Write-Success "✅ Your values.yaml is now configured for OpenShift JupyterHub spawning!"
-    Write-Host ""
-    Write-Host "🔄 To rollback if needed:" -ForegroundColor DarkYellow
-    Write-Host "   Copy-Item `"$BackupPath`" `"$ValuesPath`" -Force" -ForegroundColor DarkGray
-} elseif ($WhatIf) {
-    Write-Info "ℹ️  Run without -WhatIf to apply these changes"
-} else {
-    Write-Success "✅ No changes needed!"
-}
-
+Write-Info "🚀 Next step: helm upgrade snorkelflow . -n snorkelflow"
 Write-Host ""
