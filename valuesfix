@@ -102,77 +102,79 @@ if ($content -match $singleUserPattern) {
 }
 
 # ======================================================================
-# CHANGE 3: Add hub configuration section at the end
+# CHANGE 3: Add extraConfig to existing jupyterhub section
 # ======================================================================
-Write-Info "🔍 3. Adding hub configuration section..."
+Write-Info "🔍 3. Adding extraConfig to jupyterhub section..."
 
-# Check if hub section already exists
-if ($content -notmatch '^\s*hub:\s*$') {
-    $hubConfig = @"
+# Find the end of the singleUserNotebook section and add extraConfig
+$extraConfigPattern = '(\s*singleUserNotebook:\s*\r?\n(?:[^\r\n]*\r?\n)*?(?:\s*blockWithIptables:\s*false\s*\r?\n))'
 
-# ======================================================================
-# OpenShift compatibility overrides for JupyterHub
-# ======================================================================
-hub:
-  containerSecurityContext: {}
-  podSecurityContext: {}
-  extraConfig:
-    openshift_compatibility: |
-      # OpenShift spawner fixes
-      c.KubeSpawner.uid = None
-      c.KubeSpawner.fs_gid = None
-      c.KubeSpawner.allow_privilege_escalation = False
-      
-      # Disable problematic init containers
-      c.KubeSpawner.init_containers = []
-      
-      # Override security context for spawned pods
-      def openshift_spawn_hook(spawner):
-          # Remove hardcoded security contexts
-          spawner.uid = None
-          spawner.fs_gid = None
-          spawner.allow_privilege_escalation = False
+if ($content -match $extraConfigPattern) {
+    $extraConfig = @"
+    
+    # JupyterHub hub configuration for OpenShift
+    hub:
+      containerSecurityContext: {}
+      podSecurityContext: {}
+      extraConfig:
+        openshift_compatibility: |
+          # OpenShift spawner fixes
+          c.KubeSpawner.uid = None
+          c.KubeSpawner.fs_gid = None
+          c.KubeSpawner.allow_privilege_escalation = False
           
-          # Ensure service account (keep existing functionality)
-          spawner.service_account = "snorkelflow-jupyterhub-user-sa"
+          # Disable problematic init containers that require root
+          c.KubeSpawner.init_containers = []
           
-          # Keep the existing secret functionality
-          volume_name = "snorkel-api-key"
-          mount_path = "/var/run/snorkelflow/api"
-          spawner.volumes.append({
-              "name": volume_name,
-              "secret": {
-                  "secretName": spawner._expand_user_properties(
-                      "snorkel-api-key-{escaped_username}"
-                  ),
-              },
-          })
-          spawner.volume_mounts.append({
-              "name": volume_name,
-              "mountPath": mount_path,
-              "readOnly": True,
-          })
-          spawner.environment["SNORKELFLOW_API_KEY_FILE"] = f"{mount_path}/key"
-      
-      # Replace the spawn hook
-      c.Spawner.pre_spawn_hook = openshift_spawn_hook
-
-singleuser:
-  uid: null
-  fsGid: null
-  allowPrivilegeEscalation: false
-  cloudMetadata:
-    blockWithIptables: false
-  containerSecurityContext: {}
-  podSecurityContext: {}
+          # Override security context for spawned pods
+          def openshift_spawn_hook(spawner):
+              # Remove hardcoded security contexts
+              spawner.uid = None
+              spawner.fs_gid = None
+              spawner.allow_privilege_escalation = False
+              
+              # Ensure service account (keep existing functionality)
+              spawner.service_account = "snorkelflow-jupyterhub-user-sa"
+              
+              # Keep the existing secret functionality
+              volume_name = "snorkel-api-key"
+              mount_path = "/var/run/snorkelflow/api"
+              spawner.volumes.append({
+                  "name": volume_name,
+                  "secret": {
+                      "secretName": spawner._expand_user_properties(
+                          "snorkel-api-key-{escaped_username}"
+                      ),
+                  },
+              })
+              spawner.volume_mounts.append({
+                  "name": volume_name,
+                  "mountPath": mount_path,
+                  "readOnly": True,
+              })
+              spawner.environment["SNORKELFLOW_API_KEY_FILE"] = f"{mount_path}/key"
+          
+          # Replace the spawn hook
+          c.Spawner.pre_spawn_hook = openshift_spawn_hook
+    
+    # Global singleuser overrides for OpenShift
+    singleuser:
+      uid: null
+      fsGid: null
+      allowPrivilegeEscalation: false
+      cloudMetadata:
+        blockWithIptables: false
+      containerSecurityContext: {}
+      podSecurityContext: {}
 "@
 
-    $content += $hubConfig
-    $changes += "Added hub configuration section"
+    $replacement = $Matches[1] + $extraConfig
+    $content = $content -replace [regex]::Escape($Matches[1]), $replacement
+    $changes += "Added hub extraConfig with OpenShift spawner fixes"
     $changes += "Added singleuser global overrides"
-    if ($Verbose) { Write-Detail "  ✓ Added hub configuration with OpenShift spawner fixes" }
+    if ($Verbose) { Write-Detail "  ✓ Added hub configuration within jupyterhub service" }
 } else {
-    Write-Warning "  ⚠ hub section already exists, skipping addition"
+    Write-Warning "  ⚠ Could not find end of singleUserNotebook section to add extraConfig"
 }
 
 # ======================================================================
