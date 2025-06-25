@@ -1,5 +1,6 @@
 # Use your base Ubuntu image
 FROM ubuntu:latest
+https://www.cpan.org/src/5.0/perl-5.40.2.tar.gz
 
 # Install minimal build dependencies
 RUN apt-get update && apt-get install -y \
