@@ -1,8 +1,1 @@
-parameters: {
-  key: "dtype"
-  value: { string_value: "bfloat16" }
-}
-parameters: {
-  key: "tokenizer_mode"
-  value: { string_value: "mistral" }
-}
+VLLM_USE_V1_MULTIPROCESSING=0
