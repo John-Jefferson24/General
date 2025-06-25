@@ -1,28 +1,8 @@
-# Use your base Ubuntu image
-FROM ubuntu:latest
-https://www.cpan.org/src/5.0/perl-5.40.2.tar.gz
-
-# Install minimal build dependencies
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    zlib1g-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy the Perl tarball into the container
-COPY perl-5.40.2.tar.gz /tmp/
-
-# Extract, configure, build and install Perl
-RUN cd /tmp && \
-    tar -xzf perl-5.40.2.tar.gz && \
-    cd perl-5.40.2 && \
-    ./Configure -des -Dprefix=/usr/local && \
-    make -j$(nproc) && \
-    make install && \
-    cd / && \
-    rm -rf /tmp/perl-5.40.2*
-
-# Update PATH to use the new Perl
-ENV PATH="/usr/local/bin:${PATH}"
-
-# Verify installation
-RUN perl -v
+parameters: {
+  key: "dtype"
+  value: { string_value: "bfloat16" }
+}
+parameters: {
+  key: "tokenizer_mode"
+  value: { string_value: "mistral" }
+}
