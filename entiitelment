@@ -17,7 +17,7 @@ from urllib.error import URLError, HTTPError
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 class SimpleTritonBenchmark:
-    def __init__(self, triton_url: str = "http://localhost:9000", model_name: str = "llama-70b"):
+    def __init__(self, triton_url: str = "http://localhost:9000", model_name: str = "$MODEL_NAME"):
         self.triton_url = triton_url.rstrip('/')
         self.model_name = model_name
         self.system_info = self._get_system_info()
@@ -118,14 +118,13 @@ class SimpleTritonBenchmark:
             }
     
     def _make_inference_request(self, prompt: str, max_tokens: int = 100) -> Dict[str, Any]:
-        endpoint = f"{self.triton_url}/v1/completions"
+        endpoint = f"{self.triton_url}/v1/chat/completions"
         
         payload = {
             "model": self.model_name,
-            "prompt": prompt,
+            "messages": [{"role": "user", "content": prompt}],
             "max_tokens": max_tokens,
             "temperature": 0.7,
-            "top_p": 0.9,
             "stream": False
         }
         
@@ -138,7 +137,7 @@ class SimpleTritonBenchmark:
                 
                 if "choices" in response_json and response_json["choices"]:
                     choice = response_json["choices"][0]
-                    generated_text = choice.get("text", "")
+                    generated_text = choice.get("message", {}).get("content", "")
                     
                     usage = response_json.get("usage", {})
                     prompt_tokens = usage.get("prompt_tokens", len(prompt.split()))
@@ -176,14 +175,13 @@ class SimpleTritonBenchmark:
             }
     
     def _make_streaming_request(self, prompt: str, max_tokens: int = 100) -> Dict[str, Any]:
-        endpoint = f"{self.triton_url}/v1/completions"
+        endpoint = f"{self.triton_url}/v1/chat/completions"
         
         payload = {
             "model": self.model_name,
-            "prompt": prompt,
+            "messages": [{"role": "user", "content": prompt}],
             "max_tokens": max_tokens,
             "temperature": 0.7,
-            "top_p": 0.9,
             "stream": True
         }
         
@@ -557,7 +555,7 @@ class SimpleTritonBenchmark:
 def main():
     parser = argparse.ArgumentParser(description="Simple Triton Llama 70B benchmark")
     parser.add_argument("--url", default="http://localhost:9000", help="OpenAI-compatible Triton server URL")
-    parser.add_argument("--model", default="llama-70b", help="Model name")
+    parser.add_argument("--model", default="$MODEL_NAME", help="Model name")
     parser.add_argument("--output", help="Output filename")
     parser.add_argument("--quick", action="store_true", help="Quick benchmark")
     
