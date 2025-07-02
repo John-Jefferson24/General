@@ -1,147 +1,112 @@
-#!/usr/bin/env python3
-"""
-Comprehensive benchmarking script for Triton Llama 70B
-Supports both H100 and H200 GPUs
-Captures all key LLM serving metrics
-"""
-
-import json
-import time
-import statistics
-import argparse
-import subprocess
-import platform
-import psutil
-import threading
-from datetime import datetime
-from typing import List, Dict, Any, Tuple
-import requests
-import numpy as np
-import GPUtil
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import sys
-import os
-
-class TritonLlamaBenchmark:
-    def __init__(self, triton_url: str = "http://localhost:8000", model_name: str = "llama-70b"):
-        self.triton_url = triton_url
-        self.model_name = model_name
-        self.results = {}
-        self.system_info = self._get_system_info()
-        
-    def _get_system_info(self) -> Dict[str, Any]:
-        """Collect comprehensive system information"""
+# Streaming TTFT
+        if "streaming_ttft" in results and "time_to_first_token_stats" in results["streaming_ttft"]:
+            ttft = results["streaming_ttft"]["time_to_first_token_stats"]
+            tps = results["streaming_ttft"]["tokens_per_second_stats"]
+            print(f"\nSTREAMING (TTFT):")
+            print(f"  Mean TTFT: {ttft['mean']:.3f}s")
+            print(f"  P95 TTFT: {ttft['p95']:.3f}s")
+            print(f"  Mean Token Rate: {tps['mean']:.2f} tok/s")        # Run streaming TTFT benchmark
         try:
-            gpus = GPUtil.getGPUs()
-            gpu_info = []
-            for gpu in gpus:
-                gpu_info.append({
-                    "name": gpu.name,
-                    "memory_total": gpu.memoryTotal,
-                    "memory_free": gpu.memoryFree,
-                    "memory_used": gpu.memoryUsed,
-                    "temperature": gpu.temperature,
-                    "uuid": gpu.uuid
-                })
-        except:
-            gpu_info = []
-            
-        return {
-            "timestamp": datetime.now().isoformat(),
-            "platform": platform.platform(),
-            "cpu_count": psutil.cpu_count(),
-            "memory_total_gb": psutil.virtual_memory().total / (1024**3),
-            "gpu_info": gpu_info,
-            "python_version": sys.version,
-            "triton_url": self.triton_url,
-            "model_name": self.model_name
-        }
-    
-    def _make_inference_request(self, prompt: str, max_tokens: int = 100) -> Dict[str, Any]:
-        """Make a single inference request and measure timing"""
-        payload = {
-            "model": self.model_name,
-            "prompt": prompt,
-            "max_tokens": max_tokens,
-            "temperature": 0.7,
-            "stream": False
-        }
-        
-        start_time = time.perf_counter()
-        
-        try:
-            response = requests.post(
-                f"{self.triton_url}/v2/models/{self.model_name}/infer",
-                json=payload,
-                headers={"Content-Type": "application/json"},
-                timeout=120
-            )
-            
-            end_time = time.perf_counter()
-            
-            if response.status_code == 200:
-                result = response.json()
-                
-                # Extract response text and token count
-                generated_text = result.get("choices", [{}])[0].get("text", "")
-                
-                return {
-                    "success": True,
-                    "total_time": end_time - start_time,
-                    "generated_text": generated_text,
-                    "prompt_tokens": len(prompt.split()),  # Rough estimate
-                    "completion_tokens": len(generated_text.split()),  # Rough estimate
-                    "response_data": result
-                }
-            else:
-                return {
-                    "success": False,
-                    "error": f"HTTP {response.status_code}: {response.text}",
-                    "total_time": end_time - start_time
-                }
-                
+            results["streaming_ttft"] = self.benchmark_streaming_ttft(num_requests=3)
         except Exception as e:
-            end_time = time.perf_counter()
-            return {
-                "success": False,
-                "error": str(e),
-                "total_time": end_time - start_time
+            results["streaming_ttft"] = {"error": str(e)}    def benchmark_streaming_ttft(self, num_requests: int = 5) -> Dict[str, Any]:
+        """Benchmark streaming performance for TTFT measurement"""
+        print(f"Running TTFT streaming benchmark with {num_requests} requests...")
+        
+        test_prompts = [
+            "Write a comprehensive guide to artificial intelligence and machine learning.",
+            "Explain the principles of quantum computing and its potential applications.",
+            "Describe the impact of climate change on global ecosystems.",
+            "Analyze the evolution of programming languages from low-level to high-level.",
+            "Discuss the future of renewable energy technologies and sustainability."
+        ]
+        
+        results = []
+        
+        for i in range(num_requests):
+            prompt = test_prompts[i % len(test_prompts)]
+            result = self._make_streaming_request(prompt, max_tokens=200)
+            results.append(result)
+            
+            status = "✓" if result["success"] else "✗"
+            ttft = result.get("time_to_first_token", 0)
+            tps = result.get("tokens_per_second", 0)
+            print(f"  TTFT {i+1}/{num_requests} {status} (TTFT: {ttft:.3f}s, {tps:.1f} tok/s)")
+        
+        successful_results = [r for r in results if r["success"]]
+        
+        if not successful_results:
+            return {"error": "No successful streaming requests"}
+        
+        ttft_values = [r["time_to_first_token"] for r in successful_results]
+        tps_values = [r["tokens_per_second"] for r in successful_results]
+        
+        # Calculate percentiles manually
+        def percentile(data, p):
+            sorted_data = sorted(data)
+            k = (len(sorted_data) - 1) * p / 100
+            f = int(k)
+            c = k - f
+            if f == len(sorted_data) - 1:
+                return sorted_data[f]
+            return sorted_data[f] * (1 - c) + sorted_data[f + 1] * c
+        
+        return {
+            "total_requests": num_requests,
+            "successful_requests": len(successful_results),
+            "success_rate": len(successful_results) / num_requests,
+            "time_to_first_token_stats": {
+                "mean": sum(ttft_values) / len(ttft_values),
+                "median": sorted(ttft_values)[len(ttft_values) // 2],
+                "p95": percentile(ttft_values, 95),
+                "min": min(ttft_values),
+                "max": max(ttft_values),
+                "std": statistics.stdev(ttft_values) if len(ttft_values) > 1 else 0
+            },
+            "tokens_per_second_stats": {
+                "mean": sum(tps_values) / len(tps_values),
+                "median": sorted(tps_values)[len(tps_values) // 2],
+                "p95": percentile(tps_values, 95),
+                "min": min(tps_values),
+                "max": max(tps_values),
+                "std": statistics.stdev(tps_values) if len(tps_values) > 1 else 0
             }
-    
-    def _make_streaming_request(self, prompt: str, max_tokens: int = 100) -> Dict[str, Any]:
+        }    def _make_streaming_request(self, prompt: str, max_tokens: int = 100) -> Dict[str, Any]:
         """Make streaming request to measure TTFT and token generation rate"""
+        endpoint = f"{self.triton_url}/v1/completions"
+        
         payload = {
             "model": self.model_name,
             "prompt": prompt,
             "max_tokens": max_tokens,
             "temperature": 0.7,
+            "top_p": 0.9,
             "stream": True
         }
         
-        start_time = time.perf_counter()
-        first_token_time = None
-        tokens_received = 0
-        token_times = []
+        data = json.dumps(payload).encode('utf-8')
+        headers = {"Content-Type": "application/json"}
         
         try:
-            response = requests.post(
-                f"{self.triton_url}/v2/models/{self.model_name}/generate_stream",
-                json=payload,
-                headers={"Content-Type": "application/json"},
-                stream=True,
-                timeout=120
-            )
+            req = Request(endpoint, data=data, headers=headers)
+            start_time = time.perf_counter()
+            first_token_time = None
+            tokens_received = 0
+            token_times = []
             
-            if response.status_code == 200:
-                for line in response.iter_lines():
+            with urlopen(req, timeout=120) as response:
+                for line in response:
                     if line:
                         current_time = time.perf_counter()
                         
-                        if first_token_time is None:
-                            first_token_time = current_time - start_time
-                        
-                        tokens_received += 1
-                        token_times.append(current_time - start_time)
+                        # Try to parse SSE format
+                        line_str = line.decode('utf-8').strip()
+                        if line_str.startswith('data: '):
+                            if first_token_time is None:
+                                first_token_time = current_time - start_time
+                            
+                            tokens_received += 1
+                            token_times.append(current_time - start_time)
                 
                 end_time = time.perf_counter()
                 total_time = end_time - start_time
@@ -154,16 +119,199 @@ class TritonLlamaBenchmark:
                     "token_times": token_times,
                     "tokens_per_second": tokens_received / total_time if total_time > 0 else 0
                 }
-            else:
-                return {
-                    "success": False,
-                    "error": f"HTTP {response.status_code}: {response.text}"
-                }
                 
         except Exception as e:
             return {
                 "success": False,
                 "error": str(e)
+            }#!/usr/bin/env python3
+"""
+Simple benchmarking script for Triton Llama 70B
+Uses only native Python libraries - no external dependencies
+Works in Triton 25.05 containers
+"""
+
+import json
+import time
+import statistics
+import argparse
+import subprocess
+import platform
+import threading
+import os
+import sys
+from datetime import datetime
+from typing import List, Dict, Any
+from urllib.request import urlopen, Request
+from urllib.parse import urljoin
+from urllib.error import URLError, HTTPError
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+class SimpleTritonBenchmark:
+    def __init__(self, triton_url: str = "http://localhost:9000", model_name: str = "llama-70b"):
+        self.triton_url = triton_url.rstrip('/')
+        self.model_name = model_name
+        self.system_info = self._get_system_info()
+        
+    def _get_system_info(self) -> Dict[str, Any]:
+        """Collect basic system information using native tools"""
+        info = {
+            "timestamp": datetime.now().isoformat(),
+            "platform": platform.platform(),
+            "python_version": sys.version,
+            "triton_url": self.triton_url,
+            "model_name": self.model_name
+        }
+        
+        # Try to get GPU info via nvidia-smi
+        try:
+            result = subprocess.run(['nvidia-smi', '--query-gpu=name,memory.total,memory.free,memory.used,temperature.gpu,uuid', 
+                                   '--format=csv,noheader,nounits'], 
+                                  capture_output=True, text=True, timeout=10)
+            if result.returncode == 0:
+                gpu_lines = result.stdout.strip().split('\n')
+                gpu_info = []
+                for line in gpu_lines:
+                    if line.strip():
+                        parts = [p.strip() for p in line.split(',')]
+                        if len(parts) >= 6:
+                            gpu_info.append({
+                                "name": parts[0],
+                                "memory_total_mb": int(parts[1]),
+                                "memory_free_mb": int(parts[2]),
+                                "memory_used_mb": int(parts[3]),
+                                "temperature": int(parts[4]) if parts[4] != '[Not Supported]' else None,
+                                "uuid": parts[5]
+                            })
+                info["gpu_info"] = gpu_info
+        except:
+            info["gpu_info"] = []
+            
+        # Get CPU info
+        try:
+            with open('/proc/cpuinfo', 'r') as f:
+                cpu_info = f.read()
+                cpu_count = cpu_info.count('processor')
+                info["cpu_count"] = cpu_count
+        except:
+            info["cpu_count"] = "unknown"
+            
+        # Get memory info
+        try:
+            with open('/proc/meminfo', 'r') as f:
+                meminfo = f.read()
+                for line in meminfo.split('\n'):
+                    if line.startswith('MemTotal:'):
+                        total_kb = int(line.split()[1])
+                        info["memory_total_gb"] = round(total_kb / 1024 / 1024, 2)
+                        break
+        except:
+            info["memory_total_gb"] = "unknown"
+            
+        return info
+        
+    def _http_request(self, url: str, data: bytes = None, headers: Dict[str, str] = None) -> Dict[str, Any]:
+        """Make HTTP request using urllib"""
+        if headers is None:
+            headers = {"Content-Type": "application/json"}
+            
+        try:
+            req = Request(url, data=data, headers=headers)
+            start_time = time.perf_counter()
+            
+            with urlopen(req, timeout=120) as response:
+                end_time = time.perf_counter()
+                response_data = response.read().decode('utf-8')
+                
+                return {
+                    "success": True,
+                    "status_code": response.getcode(),
+                    "response_time": end_time - start_time,
+                    "response_data": response_data
+                }
+                
+        except HTTPError as e:
+            end_time = time.perf_counter()
+            return {
+                "success": False,
+                "status_code": e.code,
+                "response_time": end_time - start_time,
+                "error": f"HTTP {e.code}: {e.reason}"
+            }
+        except URLError as e:
+            end_time = time.perf_counter()
+            return {
+                "success": False,
+                "response_time": end_time - start_time,
+                "error": f"URL Error: {e.reason}"
+            }
+        except Exception as e:
+            end_time = time.perf_counter()
+            return {
+                "success": False,
+                "response_time": end_time - start_time,
+                "error": str(e)
+            }
+    
+    def _make_inference_request(self, prompt: str, max_tokens: int = 100) -> Dict[str, Any]:
+        """Make inference request to OpenAI-compatible Triton frontend"""
+        endpoint = f"{self.triton_url}/v1/completions"
+        
+        payload = {
+            "model": self.model_name,
+            "prompt": prompt,
+            "max_tokens": max_tokens,
+            "temperature": 0.7,
+            "top_p": 0.9,
+            "stream": False
+        }
+        
+        data = json.dumps(payload).encode('utf-8')
+        result = self._http_request(endpoint, data)
+        
+        if result["success"]:
+            try:
+                response_json = json.loads(result["response_data"])
+                
+                # OpenAI format response
+                if "choices" in response_json and response_json["choices"]:
+                    choice = response_json["choices"][0]
+                    generated_text = choice.get("text", "")
+                    
+                    # Get token usage if available
+                    usage = response_json.get("usage", {})
+                    prompt_tokens = usage.get("prompt_tokens", len(prompt.split()))
+                    completion_tokens = usage.get("completion_tokens", len(generated_text.split()))
+                    
+                    return {
+                        "success": True,
+                        "total_time": result["response_time"],
+                        "generated_text": generated_text,
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": completion_tokens,
+                        "usage": usage,
+                        "response_json": response_json
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "error": "No choices in response",
+                        "total_time": result["response_time"],
+                        "raw_response": response_json
+                    }
+                    
+            except json.JSONDecodeError as e:
+                return {
+                    "success": False,
+                    "error": f"JSON decode error: {str(e)}",
+                    "total_time": result["response_time"],
+                    "raw_response": result["response_data"]
+                }
+        else:
+            return {
+                "success": False,
+                "error": result.get("error", "Request failed"),
+                "total_time": result.get("response_time", 0)
             }
     
     def benchmark_latency(self, num_requests: int = 10) -> Dict[str, Any]:
@@ -175,7 +323,12 @@ class TritonLlamaBenchmark:
             "Explain quantum computing in simple terms.",
             "Write a short story about a robot.",
             "List the benefits of renewable energy.",
-            "Describe the process of photosynthesis."
+            "Describe the process of photosynthesis.",
+            "What are the main causes of climate change?",
+            "How does machine learning work?",
+            "Explain the theory of relativity.",
+            "What is the importance of biodiversity?",
+            "Describe the structure of an atom."
         ]
         
         results = []
@@ -184,37 +337,51 @@ class TritonLlamaBenchmark:
             prompt = test_prompts[i % len(test_prompts)]
             result = self._make_inference_request(prompt, max_tokens=50)
             results.append(result)
-            print(f"Request {i+1}/{num_requests} completed")
+            
+            status = "✓" if result["success"] else "✗"
+            print(f"Request {i+1}/{num_requests} {status} ({result.get('total_time', 0):.3f}s)")
         
         # Calculate statistics
         successful_results = [r for r in results if r["success"]]
         
         if not successful_results:
-            return {"error": "No successful requests"}
+            return {"error": "No successful requests", "failed_requests": len(results)}
         
         latencies = [r["total_time"] for r in successful_results]
+        
+        # Calculate percentiles manually
+        sorted_latencies = sorted(latencies)
+        n = len(sorted_latencies)
+        
+        def percentile(data, p):
+            k = (len(data) - 1) * p / 100
+            f = int(k)
+            c = k - f
+            if f == len(data) - 1:
+                return data[f]
+            return data[f] * (1 - c) + data[f + 1] * c
         
         return {
             "total_requests": num_requests,
             "successful_requests": len(successful_results),
             "success_rate": len(successful_results) / num_requests,
             "latency_stats": {
-                "mean": statistics.mean(latencies),
-                "median": statistics.median(latencies),
-                "p95": np.percentile(latencies, 95),
-                "p99": np.percentile(latencies, 99),
+                "mean": sum(latencies) / len(latencies),
+                "median": sorted_latencies[n // 2],
+                "p95": percentile(sorted_latencies, 95),
+                "p99": percentile(sorted_latencies, 99),
                 "min": min(latencies),
                 "max": max(latencies),
                 "std": statistics.stdev(latencies) if len(latencies) > 1 else 0
             },
-            "failed_requests": [r for r in results if not r["success"]]
+            "failed_requests": len(results) - len(successful_results)
         }
     
-    def benchmark_throughput(self, concurrent_requests: List[int] = [1, 2, 4, 8, 16]) -> Dict[str, Any]:
-        """Benchmark throughput with varying concurrency levels"""
+    def benchmark_throughput(self, concurrent_requests: List[int] = [1, 2, 4, 8]) -> Dict[str, Any]:
+        """Benchmark throughput with varying concurrency"""
         print("Running throughput benchmark...")
         
-        test_prompt = "Write a detailed explanation of machine learning algorithms and their applications in modern technology."
+        test_prompt = "Write a detailed explanation of artificial intelligence and its applications in modern technology."
         throughput_results = {}
         
         for concurrency in concurrent_requests:
@@ -244,235 +411,206 @@ class TritonLlamaBenchmark:
                 "success_rate": len(successful_results) / concurrency,
                 "total_time": total_time,
                 "total_tokens": total_tokens,
-                "requests_per_second": len(successful_results) / total_time,
-                "tokens_per_second": total_tokens / total_time,
-                "average_latency": statistics.mean([r["total_time"] for r in successful_results]) if successful_results else 0
+                "requests_per_second": len(successful_results) / total_time if total_time > 0 else 0,
+                "tokens_per_second": total_tokens / total_time if total_time > 0 else 0,
+                "average_latency": sum(r["total_time"] for r in successful_results) / len(successful_results) if successful_results else 0
             }
+            
+            print(f"  {len(successful_results)}/{concurrency} successful, {len(successful_results)/total_time:.2f} req/s, {total_tokens/total_time:.2f} tokens/s")
         
         return throughput_results
     
-    def benchmark_streaming(self, num_requests: int = 5) -> Dict[str, Any]:
-        """Benchmark streaming performance for TTFT and token rate"""
-        print(f"Running streaming benchmark with {num_requests} requests...")
+    def benchmark_token_generation(self, num_requests: int = 5) -> Dict[str, Any]:
+        """Benchmark token generation patterns"""
+        print(f"Running token generation benchmark with {num_requests} requests...")
         
-        test_prompts = [
-            "Write a comprehensive guide to artificial intelligence, covering its history, current applications, and future potential.",
-            "Explain the process of climate change, its causes, effects, and potential solutions in detail.",
-            "Describe the evolution of computer programming languages from assembly to modern high-level languages.",
-            "Analyze the impact of social media on modern society, including both positive and negative aspects.",
-            "Discuss the principles of sustainable development and their importance for future generations."
+        # Test with different token lengths
+        test_cases = [
+            {"prompt": "Write a short summary of machine learning.", "max_tokens": 50, "name": "short"},
+            {"prompt": "Explain the history and development of artificial intelligence in detail.", "max_tokens": 150, "name": "medium"},
+            {"prompt": "Write a comprehensive guide to deep learning, including its applications, benefits, and challenges.", "max_tokens": 300, "name": "long"}
         ]
         
-        results = []
+        results = {}
         
-        for i in range(num_requests):
-            prompt = test_prompts[i % len(test_prompts)]
-            result = self._make_streaming_request(prompt, max_tokens=200)
-            results.append(result)
-            print(f"Streaming request {i+1}/{num_requests} completed")
+        for test_case in test_cases:
+            case_results = []
+            
+            for i in range(num_requests):
+                result = self._make_inference_request(test_case["prompt"], test_case["max_tokens"])
+                case_results.append(result)
+                
+                status = "✓" if result["success"] else "✗"
+                tokens = result.get("completion_tokens", 0)
+                time_taken = result.get("total_time", 0)
+                rate = tokens / time_taken if time_taken > 0 else 0
+                print(f"  {test_case['name']} {i+1}/{num_requests} {status} ({tokens} tokens, {rate:.1f} tok/s)")
+            
+            successful_results = [r for r in case_results if r["success"]]
+            
+            if successful_results:
+                times = [r["total_time"] for r in successful_results]
+                tokens = [r["completion_tokens"] for r in successful_results]
+                rates = [t/time if time > 0 else 0 for t, time in zip(tokens, times)]
+                
+                results[test_case["name"]] = {
+                    "successful_requests": len(successful_results),
+                    "total_requests": num_requests,
+                    "avg_tokens": sum(tokens) / len(tokens),
+                    "avg_time": sum(times) / len(times),
+                    "avg_tokens_per_second": sum(rates) / len(rates),
+                    "max_tokens_per_second": max(rates),
+                    "min_tokens_per_second": min(rates)
+                }
         
-        successful_results = [r for r in results if r["success"]]
-        
-        if not successful_results:
-            return {"error": "No successful streaming requests"}
-        
-        ttft_values = [r["time_to_first_token"] for r in successful_results]
-        tps_values = [r["tokens_per_second"] for r in successful_results]
-        
-        return {
-            "total_requests": num_requests,
-            "successful_requests": len(successful_results),
-            "success_rate": len(successful_results) / num_requests,
-            "time_to_first_token_stats": {
-                "mean": statistics.mean(ttft_values),
-                "median": statistics.median(ttft_values),
-                "p95": np.percentile(ttft_values, 95),
-                "min": min(ttft_values),
-                "max": max(ttft_values),
-                "std": statistics.stdev(ttft_values) if len(ttft_values) > 1 else 0
-            },
-            "tokens_per_second_stats": {
-                "mean": statistics.mean(tps_values),
-                "median": statistics.median(tps_values),
-                "p95": np.percentile(tps_values, 95),
-                "min": min(tps_values),
-                "max": max(tps_values),
-                "std": statistics.stdev(tps_values) if len(tps_values) > 1 else 0
-            }
-        }
+        return results
     
-    def benchmark_memory_usage(self) -> Dict[str, Any]:
-        """Monitor GPU memory usage during inference"""
-        print("Monitoring memory usage...")
-        
+    def get_gpu_memory_usage(self) -> Dict[str, Any]:
+        """Get current GPU memory usage"""
         try:
-            gpus = GPUtil.getGPUs()
-            memory_before = {}
-            memory_after = {}
+            result = subprocess.run(['nvidia-smi', '--query-gpu=memory.used,memory.free,memory.total,utilization.gpu', 
+                                   '--format=csv,noheader,nounits'], 
+                                  capture_output=True, text=True, timeout=5)
+            if result.returncode == 0:
+                gpu_lines = result.stdout.strip().split('\n')
+                gpu_usage = []
+                for i, line in enumerate(gpu_lines):
+                    if line.strip():
+                        parts = [p.strip() for p in line.split(',')]
+                        if len(parts) >= 4:
+                            gpu_usage.append({
+                                "gpu_id": i,
+                                "memory_used_mb": int(parts[0]),
+                                "memory_free_mb": int(parts[1]),
+                                "memory_total_mb": int(parts[2]),
+                                "utilization_percent": int(parts[3])
+                            })
+                return {"gpu_usage": gpu_usage, "timestamp": time.time()}
+        except:
+            pass
             
-            for gpu in gpus:
-                memory_before[gpu.uuid] = {
-                    "memory_used": gpu.memoryUsed,
-                    "memory_free": gpu.memoryFree,
-                    "memory_total": gpu.memoryTotal,
-                    "utilization": gpu.load * 100
-                }
-            
-            # Run a memory-intensive request
-            test_prompt = "Generate a very long and detailed story about space exploration, including technical details, character development, and scientific explanations." * 3
-            result = self._make_inference_request(test_prompt, max_tokens=500)
-            
-            # Refresh GPU info
-            gpus = GPUtil.getGPUs()
-            for gpu in gpus:
-                memory_after[gpu.uuid] = {
-                    "memory_used": gpu.memoryUsed,
-                    "memory_free": gpu.memoryFree,
-                    "memory_total": gpu.memoryTotal,
-                    "utilization": gpu.load * 100
-                }
-            
-            return {
-                "memory_before": memory_before,
-                "memory_after": memory_after,
-                "request_success": result.get("success", False)
-            }
-            
-        except Exception as e:
-            return {"error": f"Memory monitoring failed: {str(e)}"}
+        return {"error": "Could not get GPU memory usage"}
     
     def run_comprehensive_benchmark(self) -> Dict[str, Any]:
-        """Run all benchmarks and compile results"""
+        """Run all benchmarks"""
         print("Starting comprehensive Triton Llama 70B benchmark...")
         print("=" * 60)
         
-        benchmark_results = {
+        results = {
             "system_info": self.system_info,
             "benchmark_start_time": datetime.now().isoformat()
         }
         
+        # Get initial GPU memory
+        results["gpu_memory_before"] = self.get_gpu_memory_usage()
+        
         # Run latency benchmark
         try:
-            benchmark_results["latency"] = self.benchmark_latency(num_requests=10)
+            results["latency"] = self.benchmark_latency(num_requests=10)
         except Exception as e:
-            benchmark_results["latency"] = {"error": str(e)}
+            results["latency"] = {"error": str(e)}
         
-        # Run throughput benchmark
+        # Run throughput benchmark  
         try:
-            benchmark_results["throughput"] = self.benchmark_throughput([1, 2, 4, 8])
+            results["throughput"] = self.benchmark_throughput([1, 2, 4, 8])
         except Exception as e:
-            benchmark_results["throughput"] = {"error": str(e)}
+            results["throughput"] = {"error": str(e)}
         
-        # Run streaming benchmark
+        # Run token generation benchmark
         try:
-            benchmark_results["streaming"] = self.benchmark_streaming(num_requests=5)
+            results["token_generation"] = self.benchmark_token_generation(num_requests=3)
         except Exception as e:
-            benchmark_results["streaming"] = {"error": str(e)}
+            results["token_generation"] = {"error": str(e)}
         
-        # Run memory benchmark
-        try:
-            benchmark_results["memory"] = self.benchmark_memory_usage()
-        except Exception as e:
-            benchmark_results["memory"] = {"error": str(e)}
+        # Get final GPU memory
+        results["gpu_memory_after"] = self.get_gpu_memory_usage()
         
-        benchmark_results["benchmark_end_time"] = datetime.now().isoformat()
+        results["benchmark_end_time"] = datetime.now().isoformat()
         
-        return benchmark_results
+        return results
     
     def save_results(self, results: Dict[str, Any], filename: str = None) -> str:
-        """Save benchmark results to JSON file"""
+        """Save results to JSON file"""
         if filename is None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             gpu_name = "unknown"
             if results["system_info"]["gpu_info"]:
-                gpu_name = results["system_info"]["gpu_info"][0]["name"].lower().replace(" ", "_")
+                gpu_name = results["system_info"]["gpu_info"][0]["name"].lower().replace(" ", "_").replace("nvidia_", "")
             filename = f"triton_llama70b_benchmark_{gpu_name}_{timestamp}.json"
         
         with open(filename, 'w') as f:
             json.dump(results, f, indent=2)
         
-        print(f"\nResults saved to: {filename}")
         return filename
     
     def print_summary(self, results: Dict[str, Any]):
-        """Print a summary of benchmark results"""
+        """Print benchmark summary"""
         print("\n" + "=" * 60)
         print("TRITON LLAMA 70B BENCHMARK SUMMARY")
         print("=" * 60)
         
         # System info
-        print(f"GPU: {results['system_info']['gpu_info'][0]['name'] if results['system_info']['gpu_info'] else 'Unknown'}")
-        print(f"Total GPU Memory: {results['system_info']['gpu_info'][0]['memory_total'] if results['system_info']['gpu_info'] else 'Unknown'} MB")
-        print(f"Model: {self.model_name}")
-        print(f"Benchmark Time: {results['benchmark_start_time']}")
+        if results["system_info"]["gpu_info"]:
+            gpu = results["system_info"]["gpu_info"][0]
+            print(f"GPU: {gpu['name']}")
+            print(f"GPU Memory: {gpu['memory_total_mb']} MB")
         
-        # Latency results
+        print(f"Model: {self.model_name}")
+        print(f"Timestamp: {results['benchmark_start_time']}")
+        
+        # Latency
         if "latency" in results and "latency_stats" in results["latency"]:
-            print(f"\nLATENCY METRICS:")
             lat = results["latency"]["latency_stats"]
-            print(f"  Mean Latency: {lat['mean']:.3f}s")
-            print(f"  P95 Latency: {lat['p95']:.3f}s")
-            print(f"  P99 Latency: {lat['p99']:.3f}s")
+            print(f"\nLATENCY:")
+            print(f"  Mean: {lat['mean']:.3f}s")
+            print(f"  P95: {lat['p95']:.3f}s") 
+            print(f"  P99: {lat['p99']:.3f}s")
             print(f"  Success Rate: {results['latency']['success_rate']:.1%}")
         
-        # Throughput results
+        # Throughput
         if "throughput" in results:
-            print(f"\nTHROUGHPUT METRICS:")
+            print(f"\nTHROUGHPUT:")
             for key, value in results["throughput"].items():
-                if isinstance(value, dict) and "requests_per_second" in value:
-                    concurrency = key.split("_")[1]
-                    print(f"  Concurrency {concurrency}: {value['requests_per_second']:.2f} req/s, {value['tokens_per_second']:.2f} tokens/s")
+                if isinstance(value, dict):
+                    conc = key.split("_")[1]
+                    print(f"  {conc} concurrent: {value['requests_per_second']:.2f} req/s, {value['tokens_per_second']:.2f} tok/s")
         
-        # Streaming results
-        if "streaming" in results and "time_to_first_token_stats" in results["streaming"]:
-            print(f"\nSTREAMING METRICS:")
-            ttft = results["streaming"]["time_to_first_token_stats"]
-            tps = results["streaming"]["tokens_per_second_stats"]
-            print(f"  Mean TTFT: {ttft['mean']:.3f}s")
-            print(f"  P95 TTFT: {ttft['p95']:.3f}s")
-            print(f"  Mean Token Rate: {tps['mean']:.2f} tokens/s")
-            print(f"  P95 Token Rate: {tps['p95']:.2f} tokens/s")
+        # Token generation
+        if "token_generation" in results:
+            print(f"\nTOKEN GENERATION:")
+            for length, stats in results["token_generation"].items():
+                if isinstance(stats, dict):
+                    print(f"  {length}: {stats['avg_tokens_per_second']:.2f} tok/s avg")
         
         print("=" * 60)
 
 def main():
-    parser = argparse.ArgumentParser(description="Benchmark Triton Llama 70B performance")
-    parser.add_argument("--url", default="http://localhost:8000", help="Triton server URL")
+    parser = argparse.ArgumentParser(description="Simple Triton Llama 70B benchmark")
+    parser.add_argument("--url", default="http://localhost:9000", help="OpenAI-compatible Triton server URL")
     parser.add_argument("--model", default="llama-70b", help="Model name")
-    parser.add_argument("--output", help="Output filename for results")
-    parser.add_argument("--quick", action="store_true", help="Run quick benchmark with fewer requests")
+    parser.add_argument("--output", help="Output filename")
+    parser.add_argument("--quick", action="store_true", help="Quick benchmark")
     
     args = parser.parse_args()
     
-    # Check dependencies
-    try:
-        import requests
-        import numpy as np
-        import GPUtil
-    except ImportError as e:
-        print(f"Missing dependency: {e}")
-        print("Install with: pip install requests numpy gputil psutil")
-        sys.exit(1)
-    
-    # Run benchmark
-    benchmark = TritonLlamaBenchmark(triton_url=args.url, model_name=args.model)
+    benchmark = SimpleTritonBenchmark(args.url, args.model)
     
     if args.quick:
         print("Running quick benchmark...")
         results = {
             "system_info": benchmark.system_info,
             "latency": benchmark.benchmark_latency(num_requests=3),
-            "streaming": benchmark.benchmark_streaming(num_requests=2)
+            "throughput": benchmark.benchmark_throughput([1, 2])
         }
     else:
         results = benchmark.run_comprehensive_benchmark()
     
-    # Save and display results
+    # Save results
     filename = benchmark.save_results(results, args.output)
     benchmark.print_summary(results)
     
-    print(f"\nBenchmark complete! Results saved to {filename}")
-    print("Send this file for analysis and presentation creation.")
+    print(f"\nResults saved to: {filename}")
+    print("Send this JSON file for analysis!")
 
 if __name__ == "__main__":
     main()
