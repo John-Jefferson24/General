@@ -397,6 +397,8 @@ class TritonTester:
                 status_code=0,
                 error=str(e)
             )
+
+def print_metrics(metrics: TestMetrics, test_name: str):
     """Print metrics in a formatted way"""
     print(f"\n{'='*50}")
     print(f"Test: {test_name}")
