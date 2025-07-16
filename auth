@@ -1,0 +1,5 @@
+registry=https://artifacts.horizon.com/artifactory/api/npm/internet-npm/
+//artifacts.horizon.bankofamerica.com/artifactory/api/npm/internet-npm/:_auth=
+//artifacts.horizon.bankofamerica.com/artifactory/api/npm/internet-npm/:email=
+//artifacts.horizon.bankofamerica.com/artifactory/api/npm/internet-npm/:always-auth=true
+strict-ssl=false
