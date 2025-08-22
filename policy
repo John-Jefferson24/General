@@ -24,8 +24,12 @@ spec:
       port: 53
     - protocol: TCP
       port: 53
+    - protocol: UDP
+      port: 5353
     - protocol: TCP
       port: 5353
+    - protocol: TCP
+      port: 8080
   # Allow HTTPS only to SSO/Fed specific IP blocks
   - to:
     - ipBlock:
