@@ -1,40 +1,24 @@
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: jupyterhub-projects-unified-policy
-  namespace: 74388-confl
-  labels:
-    app: jupyterhub-genai
-    name: jupyterhub-genai
-    template: jupyterhub-genai
+resourceVersion: "488882984"
+name: reverse-dictionary-internal-only-networkpolicy
+uid: dae4ad35-8417-432c-81ef-4e9394d3399e
+creationTimestamp: "2025-08-08T08:40:507"
+generation: 1
+managedFields: ...
+namespace: 74388-confl
+labels:
+  app: jupyterhub-genai
+  name: jupyterhub-genai
+  template: jupyterhub-genai
 spec:
   podSelector:
     matchExpressions:
     - key: project
       operator: In
-      values: ["reverse-dictionary", "ffeg"]  # Add new projects here
+      values: ["reverse-dictionary", "ffeg"]
   egress:
-  # Allow all traffic within the same namespace
   - to:
     - namespaceSelector:
         matchLabels:
-          name: 74388-confl
-  # Allow DNS resolution and specific external ports
-  - to: []
-    ports:
-    - protocol: UDP
-      port: 53
-    - protocol: TCP
-      port: 53
-    - protocol: TCP
-      port: 5353
-    - protocol: TCP
-      port: 8080
-  # Allow access to specific internal IP blocks only
-  - to:
-    - ipBlock:
-        cidr: 171.20.133.25/32
-    - ipBlock:
-        cidr: 164.91.222.209/32
+          name: 74388-confl  # Allow all traffic within same namespace
   policyTypes:
   - Egress
