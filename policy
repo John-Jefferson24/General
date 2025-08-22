@@ -1,26 +1,41 @@
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: jupyterhub-projects-internal-only
-  labels:
-    app: jupyterhub-genai
-    name: jupyterhub-genai
-    template: jupyterhub-genai
-spec:
-  podSelector:
-    matchExpressions:
-    - key: project
-      operator: In
-      values: ["reverse-dictionary", "ffep", "bbg"]
-  egress:
+Here's a clear description for your PR:
+
+## Network Policy Update: Multi-Project PyPI Access
+
+### Problem
+New JupyterHub projects (ffep, bbg) couldn't access the shared PyPI server because they weren't covered by existing network policies.
+
+### Solution
+Updated the `podSelector` in the internal-only network policy to include new project labels, enabling access to shared infrastructure.
+
+### Changes Made
+- **File**: `internal-only-networkpolicy.yaml`
+- **Change**: Updated `podSelector.matchLabels.project` from `reverse-dictionary` to `ffep` (and `bbg` in separate instances)
+- **Template Variable**: Added `EGRESS_LABEL` = `reverse-dictionary` for shared services targeting
+
+### How It Works
+1. **Policy Inheritance**: New project pods now inherit permissions from all 3 existing network policies:
+   - Internal access to shared services (PyPI, APIs)
+   - DNS resolution capabilities  
+   - SSO/Fed authentication access
+
+2. **Shared Services Model**: 
+   - PyPI server retains `project=reverse-dictionary` label
+   - New projects can access it via `egress.to.podSelector.project=reverse-dictionary`
+   - Maintains security boundary while enabling cross-project resource sharing
+
+### Security Impact
+✅ **Maintained**: HTTP internet browsing still blocked  
+✅ **Maintained**: Only specific external access allowed (DNS, SSO)  
+✅ **Enhanced**: New projects get same security profile as original
+
+### Template Usage
+```yaml
+egress:
   - to:
     - podSelector:
         matchLabels:
-          app: pypiserver
-  - to:
-    - podSelector:
-        matchExpressions:
-        - key: project
-          operator: Exists
-  policyTypes:
-  - Egress
+          project: ${EGRESS_LABEL}  # "reverse-dictionary"
+```
+
+This approach scales cleanly for future projects while maintaining the proven 3-policy security architecture.
