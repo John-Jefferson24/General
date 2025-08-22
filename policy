@@ -2,7 +2,6 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: jupyterhub-projects-unified-policy
-  namespace: 74388-confl
   labels:
     app: jupyterhub-genai
     name: jupyterhub-genai
@@ -12,13 +11,13 @@ spec:
     matchExpressions:
     - key: project
       operator: In
-      values: ["reverse-dictionary", "ffeg"]  # Add new projects here
+      values: ["reverse-dictionary", "ffep", "bbg"]
   egress:
-  # Allow all traffic within the same namespace (auto-match)
   - to:
     - namespaceSelector: {}
-  # Allow DNS resolution
-  - to: []
+  - to:
+    - ipBlock:
+        cidr: 0.0.0.0/0
     ports:
     - protocol: UDP
       port: 53
@@ -28,16 +27,16 @@ spec:
       port: 5353
     - protocol: TCP
       port: 5353
+  - to:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+    ports:
     - protocol: TCP
       port: 8080
-  # Allow HTTPS only to SSO/Fed specific IP blocks
   - to:
     - ipBlock:
         cidr: 171.20.133.25/32
     - ipBlock:
         cidr: 164.91.222.209/32
-    ports:
-    - protocol: TCP
-      port: 443
   policyTypes:
   - Egress
