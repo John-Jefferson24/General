@@ -14,8 +14,13 @@ spec:
       values: ["reverse-dictionary", "ffep", "bbg"]
   egress:
   - to:
-    - namespaceSelector:
+    - podSelector:
         matchLabels:
-          kubernetes.io/metadata.name: 74388-confl
+          app: pypiserver
+  - to:
+    - podSelector:
+        matchExpressions:
+        - key: project
+          operator: Exists
   policyTypes:
   - Egress
