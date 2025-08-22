@@ -1,7 +1,7 @@
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: jupyterhub-projects-unified-policy
+  name: jupyterhub-projects-internal-only
   labels:
     app: jupyterhub-genai
     name: jupyterhub-genai
@@ -14,29 +14,8 @@ spec:
       values: ["reverse-dictionary", "ffep", "bbg"]
   egress:
   - to:
-    - namespaceSelector: {}
-  - to:
-    - ipBlock:
-        cidr: 0.0.0.0/0
-    ports:
-    - protocol: UDP
-      port: 53
-    - protocol: TCP
-      port: 53
-    - protocol: UDP
-      port: 5353
-    - protocol: TCP
-      port: 5353
-  - to:
-    - ipBlock:
-        cidr: 0.0.0.0/0
-    ports:
-    - protocol: TCP
-      port: 8080
-  - to:
-    - ipBlock:
-        cidr: 171.20.133.25/32
-    - ipBlock:
-        cidr: 164.91.222.209/32
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: 74388-confl
   policyTypes:
   - Egress
