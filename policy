@@ -1,0 +1,19 @@
+name: reverse-dictionary-internal-only-networkpolicy
+namespace: 74388-confl
+labels:
+  app: jupyterhub-genai
+  name: jupyterhub-genai
+  template: jupyterhub-genai
+spec:
+  podSelector:
+    matchExpressions:
+    - key: project
+      operator: In
+      values: ["reverse-dictionary", "ffeg"]
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app: pypiserver
+  policyTypes:
+  - Egress
