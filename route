@@ -1,66 +1,40 @@
 # =========================
-# REQUIRED: set your public hosts
+# Public addresses
 # =========================
 server.default_advertised_address=UI_HOST
-# For drivers: advertised Bolt address (LB:7687 or passthrough :443)
-# If you are using a LoadBalancer on 7687, include the port below.
+# For drivers (LoadBalancer or passthrough Route)
 server.bolt.advertised_address=BOLT_HOST:7687
 
 # =========================
-# Listen / advertise basics
+# Listeners
 # =========================
 server.default_listen_address=0.0.0.0
-server.bolt.enabled=true
-server.bolt.listen_address=0.0.0.0:7687
-
-# HTTP for the web UI (your OpenShift Route terminates TLS)
 server.http.enabled=true
 server.http.listen_address=0.0.0.0:7474
-# (Do NOT enable server.https when you’re using an edge-terminated Route.)
-
-# Make Bolt TLS optional for now (easier debugging with mixed clients).
-# Later, switch to REQUIRED and install proper certs.
-server.bolt.tls_level=OPTIONAL
+server.bolt.enabled=true
+server.bolt.listen_address=0.0.0.0:7687
+server.bolt.tls_level=OPTIONAL     # easier debugging
 
 # =========================
-# Put ALL writable bits under /workspace
+# Writable directories → /workspace
 # =========================
-# Core data & tx logs
 server.directories.data=/workspace/data
 server.directories.transaction.logs.root=/workspace/tx-logs
-
-# Operational logs, run state, metrics, dumps
 server.directories.logs=/workspace/logs
 server.directories.run=/workspace/run
-server.directories.metrics=/workspace/metrics
-server.directories.dumps.root=/workspace/dumps
-
-# Import / plugins
-server.directories.import=/workspace/import
 server.directories.plugins=/workspace/plugins
+server.directories.import=/workspace/import
 
-# (Optional) If you want to force an absolute "home" root for resolving relatives:
-# server.directories.neo4j_home=/workspace
+# (Optional)
+# server.directories.lib=/workspace/lib
 
 # =========================
-# Logging: crank it up for debugging
+# Debug logging
 # =========================
 server.logs.debug.enabled=true
 dbms.logs.http.enabled=true
 
-# Query logging (Enterprise feature). If you’re on Community, Neo4j will ignore these.
+# Query log (ignored on Community)
 db.logs.query.enabled=VERBOSE
 db.logs.query.threshold=0s
 db.logs.query.parameter_logging_enabled=true
-db.logs.query.plan_description_enabled=false
-
-# =========================
-# Nice-to-haves while debugging
-# =========================
-# Allow large transactions to avoid spurious OOM while testing
-db.memory.transaction.max=0B
-db.memory.transaction.total.max=0B
-
-# Make sure initial user password can be set non-interactively if needed
-# dbms.security.auth_enabled=true
-# dbms.security.auth_minimum_password_length=8
