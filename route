@@ -1,40 +1,32 @@
-# =========================
-# Public addresses
-# =========================
-server.default_advertised_address=UI_HOST
-# For drivers (LoadBalancer or passthrough Route)
-server.bolt.advertised_address=BOLT_HOST:7687
-
-# =========================
-# Listeners
-# =========================
-server.default_listen_address=0.0.0.0
-server.http.enabled=true
-server.http.listen_address=0.0.0.0:7474
-server.bolt.enabled=true
-server.bolt.listen_address=0.0.0.0:7687
-server.bolt.tls_level=OPTIONAL     # easier debugging
-
-# =========================
-# Writable directories → /workspace
-# =========================
-server.directories.data=/workspace/data
-server.directories.transaction.logs.root=/workspace/tx-logs
-server.directories.logs=/workspace/logs
-server.directories.run=/workspace/run
-server.directories.plugins=/workspace/plugins
-server.directories.import=/workspace/import
-
-# (Optional)
-# server.directories.lib=/workspace/lib
-
-# =========================
-# Debug logging
-# =========================
-server.logs.debug.enabled=true
-dbms.logs.http.enabled=true
-
-# Query log (ignored on Community)
-db.logs.query.enabled=VERBOSE
-db.logs.query.threshold=0s
-db.logs.query.parameter_logging_enabled=true
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: neo4j-config
+data:
+  neo4j.conf: |
+    # Enable connectors
+    dbms.connector.https.enabled=true
+    dbms.connector.http.enabled=false
+    dbms.connector.bolt.enabled=true
+    dbms.connector.bolt.tls_level=REQUIRED
+    
+    # Advertised addresses
+    dbms.connector.bolt.advertised_address=bolt.neo4j.apps.uswest70.bofa.com:443
+    
+    # CORS
+    dbms.security.http_access_control_allow_origin=https://neo4j.apps.uswest70.bofa.com
+    dbms.security.http_access_control_allow_headers=accept,authorization,content-type,x-requested-with
+    
+    # HTTPS SSL Policy
+    dbms.ssl.policy.https.enabled=true
+    dbms.ssl.policy.https.base_directory=certificates/https
+    dbms.ssl.policy.https.private_key=private.key
+    dbms.ssl.policy.https.public_certificate=public.crt
+    dbms.ssl.policy.https.client_auth=NONE
+    
+    # Bolt SSL Policy  
+    dbms.ssl.policy.bolt.enabled=true
+    dbms.ssl.policy.bolt.base_directory=certificates/bolt
+    dbms.ssl.policy.bolt.private_key=private.key
+    dbms.ssl.policy.bolt.public_certificate=public.crt
+    dbms.ssl.policy.bolt.client_auth=NONE
