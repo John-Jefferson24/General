@@ -40,3 +40,6 @@ data:
     dbms.ssl.policy.bolt.private_key=private.key
     dbms.ssl.policy.bolt.public_certificate=public.crt
     dbms.ssl.policy.bolt.client_auth=NONE
+
+
+haproxy.router.openshift.io/rewrite-target: /browser/preview
