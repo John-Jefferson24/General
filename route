@@ -4,25 +4,37 @@ metadata:
   name: neo4j-config
 data:
   neo4j.conf: |
-    # Network Connectors (server.* format)
-    server.https.enabled=true
+    # Default addresses
+    server.default_listen_address=0.0.0.0
+    server.default_advertised_address=0.0.0.0
+    
+    # HTTP Connector (DISABLED)
     server.http.enabled=false
+    server.http.listen_address=:7474
+    
+    # HTTPS Connector
+    server.https.enabled=true
+    server.https.listen_address=:7473
+    
+    # Bolt Connector  
     server.bolt.enabled=true
-    server.bolt.tls_level=REQUIRED
+    server.bolt.listen_address=:7687
     server.bolt.advertised_address=bolt.neo4j.apps.uswest70.bofa.com:443
+    server.bolt.tls_level=REQUIRED
     
     # CORS for HTTPS UI
     dbms.security.http_access_control_allow_origin=https://neo4j.apps.uswest70.bofa.com
     dbms.security.http_access_control_allow_headers=accept,authorization,content-type,x-requested-with
     dbms.security.http_access_control_allow_methods=GET,POST,PUT,DELETE,OPTIONS
     
-    # SSL Policies (dbms.ssl.policy.* format - unchanged)
+    # HTTPS SSL Policy
     dbms.ssl.policy.https.enabled=true
     dbms.ssl.policy.https.base_directory=certificates/https
     dbms.ssl.policy.https.private_key=private.key
     dbms.ssl.policy.https.public_certificate=public.crt
     dbms.ssl.policy.https.client_auth=NONE
     
+    # Bolt SSL Policy  
     dbms.ssl.policy.bolt.enabled=true
     dbms.ssl.policy.bolt.base_directory=certificates/bolt
     dbms.ssl.policy.bolt.private_key=private.key
