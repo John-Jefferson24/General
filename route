@@ -43,3 +43,4 @@ data:
 
 
 haproxy.router.openshift.io/rewrite-target: /browser/preview
+haproxy.router.openshift.io/balance: source
