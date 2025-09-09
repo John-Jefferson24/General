@@ -1,48 +1,66 @@
-apiVersion: v1
-kind: Service
-metadata:
-  name: neo4j
-spec:
-  type: NodePort
-  ports:
-  - name: http
-    port: 7474
-    targetPort: 7474
-    nodePort: 32432
-  - name: bolt
-    port: 7687
-    targetPort: 7687
-    nodePort: 30807
-  selector:
-    app: neo4j
+# =========================
+# REQUIRED: set your public hosts
+# =========================
+server.default_advertised_address=UI_HOST
+# For drivers: advertised Bolt address (LB:7687 or passthrough :443)
+# If you are using a LoadBalancer on 7687, include the port below.
+server.bolt.advertised_address=BOLT_HOST:7687
 
-apiVersion: route.openshift.io/v1
-kind: Route
-metadata:
-  name: neo4j-ui
-spec:
-  host:
-  port:
-    targetPort: http
-  tls:
-    termination: edge
-  to:
-    kind: Service
-    name: neo4j
+# =========================
+# Listen / advertise basics
+# =========================
+server.default_listen_address=0.0.0.0
+server.bolt.enabled=true
+server.bolt.listen_address=0.0.0.0:7687
 
-apiVersion: route.openshift.io/v1
-kind: Route
-metadata:
-  name: neo4j-bolt
-spec:
-  host:
-  port:
-    targetPort: bolt
-  tls:
-    termination: passthrough
-  to:
-    kind: Service
-    name: neo4j
-    weight: 100
-  wildcardPolicy: None
+# HTTP for the web UI (your OpenShift Route terminates TLS)
+server.http.enabled=true
+server.http.listen_address=0.0.0.0:7474
+# (Do NOT enable server.https when you’re using an edge-terminated Route.)
 
+# Make Bolt TLS optional for now (easier debugging with mixed clients).
+# Later, switch to REQUIRED and install proper certs.
+server.bolt.tls_level=OPTIONAL
+
+# =========================
+# Put ALL writable bits under /workspace
+# =========================
+# Core data & tx logs
+server.directories.data=/workspace/data
+server.directories.transaction.logs.root=/workspace/tx-logs
+
+# Operational logs, run state, metrics, dumps
+server.directories.logs=/workspace/logs
+server.directories.run=/workspace/run
+server.directories.metrics=/workspace/metrics
+server.directories.dumps.root=/workspace/dumps
+
+# Import / plugins
+server.directories.import=/workspace/import
+server.directories.plugins=/workspace/plugins
+
+# (Optional) If you want to force an absolute "home" root for resolving relatives:
+# server.directories.neo4j_home=/workspace
+
+# =========================
+# Logging: crank it up for debugging
+# =========================
+server.logs.debug.enabled=true
+dbms.logs.http.enabled=true
+
+# Query logging (Enterprise feature). If you’re on Community, Neo4j will ignore these.
+db.logs.query.enabled=VERBOSE
+db.logs.query.threshold=0s
+db.logs.query.parameter_logging_enabled=true
+db.logs.query.plan_description_enabled=false
+
+# =========================
+# Nice-to-haves while debugging
+# =========================
+# Allow large transactions to avoid spurious OOM while testing
+db.memory.transaction.max=0B
+db.memory.transaction.total.max=0B
+
+# Make sure initial user password can be set non-interactively if needed
+# dbms.security.auth_enabled=true
+# dbms.security.auth_minimum_password_length=8
