@@ -46,3 +46,22 @@ dbms.allow_upgrade=true
 
 # Logging
 server.logs.user.enabled=true
+
+echo "Starting Neo4j with socat proxy for Bolt..."
+
+# Start socat in background
+# Listen on 8687, forward to Neo4j Bolt on 7687
+echo "Starting socat proxy (8687 -> 7687)..."
+socat TCP-LISTEN:8687,reuseaddr,fork,keepalive,nodelay TCP:127.0.0.1:7687 &
+SOCAT_PID=$!
+
+# Give socat a moment to start
+sleep 2
+
+# Check if socat is running
+if ! kill -0 $SOCAT_PID 2>/dev/null; then
+    echo "ERROR: socat failed to start"
+    exit 1
+fi
+
+echo "socat proxy started with PID $SOCAT_PID"
