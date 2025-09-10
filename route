@@ -1,49 +1,48 @@
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: neo4j-config
-data:
-  neo4j.conf: |
-    # Default addresses
-    server.default_listen_address=0.0.0.0
-    server.default_advertised_address=0.0.0.0
-    
-    # HTTP Connector (DISABLED)
-    server.http.enabled=false
-    server.http.listen_address=:7474
-    
-    # HTTPS Connector
-    server.https.enabled=true
-    server.https.listen_address=:7473
-    
-    # Bolt Connector  
-    server.bolt.enabled=true
-    server.bolt.listen_address=:7687
-    server.bolt.advertised_address=bolt.neo4j.apps.uswest70.bofa.com:443
-    server.bolt.tls_level=REQUIRED
-    
-    # CORS for HTTPS UI
-    dbms.security.http_access_control_allow_origin=https://neo4j.apps.uswest70.bofa.com
-    dbms.security.http_access_control_allow_headers=accept,authorization,content-type,x-requested-with
-    dbms.security.http_access_control_allow_methods=GET,POST,PUT,DELETE,OPTIONS
-    
-    # HTTPS SSL Policy
-    dbms.ssl.policy.https.enabled=true
-    dbms.ssl.policy.https.base_directory=certificates/https
-    dbms.ssl.policy.https.private_key=private.key
-    dbms.ssl.policy.https.public_certificate=public.crt
-    dbms.ssl.policy.https.client_auth=NONE
-    
-    # Bolt SSL Policy  
-    dbms.ssl.policy.bolt.enabled=true
-    dbms.ssl.policy.bolt.base_directory=certificates/bolt
-    dbms.ssl.policy.bolt.private_key=private.key
-    dbms.ssl.policy.bolt.public_certificate=public.crt
-    dbms.ssl.policy.bolt.client_auth=NONE
+#*****************************************************************
+# Neo4j 5.26 Configuration for OpenShift with Edge Termination
+#*****************************************************************
 
+# Database settings
+server.databases.default_to_read_only=false
+initial.dbms.default_database=neo4j
 
-haproxy.router.openshift.io/rewrite-target: /browser/preview
-haproxy.router.openshift.io/balance: source
-haproxy.router.openshift.io/timeout: 1h
-haproxy.router.openshift.io/timeout-tunnel: 1h
-haproxy.router.openshift.io/disable_h2: "true"
+# Memory settings (adjust based on your container limits)
+server.memory.heap.initial_size=512m
+server.memory.heap.max_size=2G
+server.memory.pagecache.size=512m
+
+# HTTP Connector (UI) - Plain HTTP since edge handles TLS
+server.http.enabled=true
+server.http.listen_address=0.0.0.0:7474
+server.https.enabled=false
+
+# Bolt Connector - Listen only on localhost since socat proxies
+server.bolt.enabled=true
+server.bolt.listen_address=127.0.0.1:7687
+
+# Disable SSL policies since edge termination handles TLS
+dbms.ssl.policy.bolt.enabled=false
+dbms.ssl.policy.https.enabled=false
+
+# Network settings
+server.default_listen_address=0.0.0.0
+server.default_advertised_address=localhost
+
+# Security - Set to false for initial setup, enable after setting password
+dbms.security.auth_enabled=false
+
+# Transaction settings
+db.transaction.timeout=30s
+db.lock.acquisition.timeout=10s
+
+# Directories (using default structure)
+server.directories.data=data
+server.directories.logs=logs
+server.directories.import=import
+server.directories.plugins=plugins
+
+# Allow upgrade if needed
+dbms.allow_upgrade=true
+
+# Logging
+server.logs.user.enabled=true
