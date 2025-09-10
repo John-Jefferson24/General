@@ -46,3 +46,4 @@ haproxy.router.openshift.io/rewrite-target: /browser/preview
 haproxy.router.openshift.io/balance: source
 haproxy.router.openshift.io/timeout: 1h
 haproxy.router.openshift.io/timeout-tunnel: 1h
+haproxy.router.openshift.io/disable_h2: "true"
